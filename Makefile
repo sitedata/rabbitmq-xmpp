@@ -3,7 +3,7 @@
 DOC_DIR=doc
 VERSION=0.0.1
 
-EJABBERD_INCLUDE_DIR=/usr/lib/ejabberd/include
+EJABBERD_INCLUDE_DIR=/usr/local/ejabberd/lib/ejabberd/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
 WIDTH=1024

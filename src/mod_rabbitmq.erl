@@ -421,7 +421,7 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
-	#binding{queue_name = #resource{name = QNameBin}, key = RKBin} <-
+	#binding{destination = #resource{name = QNameBin}, key = RKBin} <-
             rabbit_call(rabbit_binding, list_for_exchange, [XName])].
 
 unsub_all(XNameBin, ExchangeJID) ->
@@ -470,7 +470,7 @@ rabbit_exchange_list_queue_bindings(QN) ->
 
 is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
-    lists:any(fun (#binding{exchange_name = N, key = R})
+    lists:any(fun (#binding{source = N, key = R})
                     when N == XName andalso R == RKBin ->
 		      true;
 		  (_) ->
@@ -485,8 +485,8 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 	    #amqqueue{} = rabbit_call(rabbit_amqqueue, declare,
                                       [?QNAME(QNameBin), true, false, [], none]),
 	    ok = rabbit_call(rabbit_binding, add,
-                             [#binding{exchange_name = ?XNAME(XNameBin),
-                                       queue_name    = ?QNAME(QNameBin),
+                             [#binding{source        = ?XNAME(XNameBin),
+                                       destination   = ?QNAME(QNameBin),
                                        key           = RKBin,
                                        args          = []}]),
 	    true;
@@ -500,8 +500,8 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
     QName = ?QNAME(QNameBin),
     case rabbit_call(rabbit_binding, remove,
-                     [#binding{exchange_name = XName,
-                               queue_name    = QName,
+                     [#binding{source        = XName,
+                               destination   = QName,
                                key           = RKBin,
                                args          = []}]) of
 	{error, _Reason} ->
@@ -564,7 +564,7 @@ probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Res
 
 probe_bindings(_Server, _JID, []) ->
     ok;
-probe_bindings(Server, JID, [#binding{exchange_name = {
+probe_bindings(Server, JID, [#binding{source = {
                                         #resource{name = XNameBin}}} | Rest]) ->
     ?DEBUG("**** Probing ~p ~p ~p", [JID, XNameBin, Server]),
     SourceJID = jlib:make_jid(binary_to_list(XNameBin), Server, ""),
