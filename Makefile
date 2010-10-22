@@ -2,6 +2,7 @@
 
 DOC_DIR=doc
 VERSION=0.0.1
+EBIN_DIR=./ebin
 
 EJABBERD_INCLUDE_DIR=/usr/local/ejabberd/lib/ejabberd/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
@@ -22,7 +23,7 @@ check_rabbit_hrl:
 	@if [ -e $(CANONICAL_RABBIT_HEADER) ]; then diff -q $(CANONICAL_RABBIT_HEADER) src/rabbit.hrl; else echo Skipping rabbit.hrl check because $(CANONICAL_RABBIT_HEADER) does not exist; fi
 
 clean:
-	rm -f mod_rabbitmq.beam
+	rm -rf $(EBIN_DIR)
 	rm -f build-stamp install-stamp
 
 clean-doc:
@@ -52,5 +53,7 @@ doc/%.png: src/%.svg
 
 %.beam: src/%.erl
 	erlc -I $(EJABBERD_INCLUDE_DIR) $<
+	mkdir -p $(EBIN_DIR)
+	mv $@ $(EBIN_DIR)
 
 distclean: clean
