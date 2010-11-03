@@ -4,6 +4,7 @@ DOC_DIR=doc
 VERSION=0.0.1
 EBIN_DIR=./ebin
 
+EJABBERD_EBIN_DIR=/usr/local/ejabberd/lib/ejabberd/ebin
 EJABBERD_INCLUDE_DIR=/usr/local/ejabberd/lib/ejabberd/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
@@ -15,6 +16,11 @@ ifeq ($(shell uname -s),Darwin)
 SED=gsed
 else
 SED=sed
+endif
+
+EFLAGS= -pa $(EJABBERD_EBIN_DIR)
+ifdef debug
+  EFLAGS+=+debug_info +export_all
 endif
 
 all: check_rabbit_hrl mod_rabbitmq.beam
@@ -52,7 +58,7 @@ doc/%.png: src/%.svg
 	inkscape --export-dpi=$(DPI) --export-png=$@ $<
 
 %.beam: src/%.erl
-	erlc -I $(EJABBERD_INCLUDE_DIR) $<
+	erlc $(EFLAGS) -I $(EJABBERD_INCLUDE_DIR) $<
 	mkdir -p $(EBIN_DIR)
 	mv $@ $(EBIN_DIR)
 
