@@ -1,5 +1,22 @@
-This project was initially forked from <http://hg.rabbitmq.com/rabbitmq-xmpp/>, which was released by Tony Garnock-Jones <http://www.lshift.net/blog/2008/07/01/rabbitmq-xmpp-gateway-released>.
+This project was initially forked from http://hg.rabbitmq.com/rabbitmq-xmpp/, which was released by Tony Garnock-Jones http://www.lshift.net/blog/2008/07/01/rabbitmq-xmpp-gateway-released.
 
-This project is created for corresponding with the latest ejabberd and rabbitmq-server, and for some customizations which will list in README.CUSTOMIZED. 
+This project is created for corresponding with the latest ejabberd and rabbitmq-server, and for some customizations which will list in README.CUSTOMIZED. Anyway, the primary document is worth reading http://hg.rabbitmq.com/rabbitmq-xmpp/raw-file/default/doc/index.html.
 
-Anyway, the primary document is worth reading <http://hg.rabbitmq.com/rabbitmq-xmpp/raw-file/default/doc/index.html>.
+###########################################################
+
+To install this module, you should:
+
+1 specify the ejabberd dir, which will default to /usr/loca/ejabberd if not set:
+
+    make EJABBERD_DIR=[/path/to/ejabberd]
+
+2.1 add the module dir to ejabberdctl.cfg:
+    
+    ERL_OPTIONS="-pa [/path/to/rabbitmq-xmpp]/ebin"
+
+or 
+
+2.2 copy the beam files to ejabberd ebin directory, in which case you will profit from the ejabberd_update function.
+
+
+###########################################################
