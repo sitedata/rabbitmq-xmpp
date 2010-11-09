@@ -1,0 +1,13 @@
+To install this module, you should:
+
+1 specify the ejabberd dir, which will default to /usr/loca/ejabberd if not set:
+
+    make EJABBERD_DIR=[/path/to/ejabberd]
+
+2.1 add the module dir to ejabberdctl.cfg:
+    
+    ERL_OPTIONS="-pa [/path/to/rabbitmq-xmpp]/ebin"
+
+or 
+
+2.2 copy the beam files to ejabberd ebin directory, in which case you will profit from the ejabberd_update function.

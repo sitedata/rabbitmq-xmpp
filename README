@@ -1,0 +1,5 @@
+This project was initially forked from <http://hg.rabbitmq.com/rabbitmq-xmpp/>, which was released by Tony Garnock-Jones <http://www.lshift.net/blog/2008/07/01/rabbitmq-xmpp-gateway-released>.
+
+This project is created for corresponding with the latest ejabberd and rabbitmq-server, and for some customizations which will list in README.CUSTOMIZED. 
+
+Anyway, the primary document is worth reading <http://hg.rabbitmq.com/rabbitmq-xmpp/raw-file/default/doc/index.html>.
