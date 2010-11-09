@@ -4,8 +4,11 @@ DOC_DIR=doc
 VERSION=0.0.1
 EBIN_DIR=./ebin
 
-EJABBERD_EBIN_DIR=/usr/local/ejabberd/lib/ejabberd/ebin
-EJABBERD_INCLUDE_DIR=/usr/local/ejabberd/lib/ejabberd/include
+ifndef EJABBERD_DIR
+EJABBERD_DIR=/usr/local/ejabberd/lib/ejabberd
+endif
+EJABBERD_EBIN_DIR=$(EJABBERD_DIR)/ebin
+EJABBERD_INCLUDE_DIR=$(EJABBERD_DIR)/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
 WIDTH=1024
