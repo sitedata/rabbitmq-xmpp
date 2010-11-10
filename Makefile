@@ -11,6 +11,9 @@ EJABBERD_EBIN_DIR=$(EJABBERD_DIR)/ebin
 EJABBERD_INCLUDE_DIR=$(EJABBERD_DIR)/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
+EJABBERD_INCLUDE_DIR=/usr/lib/ejabberd/include
+CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
+
 WIDTH=1024
 #WIDTH=800
 DPI=$(shell echo '90 * $(WIDTH) / 1024' | bc)

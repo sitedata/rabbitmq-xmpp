@@ -644,6 +644,7 @@ probe_queues(Server, Arg) ->
 
 probe_bindings(_Server, _JID, []) ->
     ok;
+
 probe_bindings(Server, JID, [#binding{source = #resource{name = XNameBin}} | Rest]) ->
     ?DEBUG("**** Probing ~p ~p ~p", [JID, XNameBin, Server]),
     SourceJID = jlib:make_jid(binary_to_list(XNameBin), Server, ""),
