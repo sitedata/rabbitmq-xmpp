@@ -38,7 +38,7 @@
 -export([start_link/2, start/2, stop/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([route/3]).
--export([consumer_init/5, consumer_main/1]).
+-export([consumer_init/6, consumer_main/1]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -54,6 +54,10 @@
 
 -define(PROCNAME, ejabberd_mod_rabbitmq).
 -define(TABLENAME, ?PROCNAME).
+
+-define(RPC_TIMEOUT, 30000).
+-define(RABBITMQ_HEARTBEAT, 5000).
+-define(ROUND_ATTEMPTS, 5).
 
 %% @hidden
 start_link(Host, Opts) ->
@@ -82,36 +86,46 @@ stop(Host) ->
 
 %% @hidden
 init([Host, Opts]) ->
-    ok = contact_rabbitmq(),
+	RabbitNode = get_rabbit_node_config(),
+	put(rabbitmq_node, RabbitNode),
+	spawn_link( fun() -> ensure_connection_to_rabbitmq(Host, RabbitNode) end),
 
     mnesia:create_table(rabbitmq_consumer_process,
 			[{attributes, record_info(fields, rabbitmq_consumer_process)}]),
 
     MyHost = gen_mod:get_opt_host(Host, Opts, "rabbitmq.@HOST@"),
-    ejabberd_router:register_route(MyHost, {apply, ?MODULE, route}),
+    ejabberd_router:register_route(MyHost),
 
     probe_queues(MyHost),
 
     {ok, #state{host = MyHost}}.
 
-contact_rabbitmq() ->
-    case get(rabbitmq_node) of
-        undefined ->
-            RabbitNode = case gen_mod:get_module_opt(global, ?MODULE, rabbitmq_node, undefined) of
-                             undefined ->
-                                 [_NodeName, NodeHost] = string:tokens(atom_to_list(node()), "@"),
-                                 list_to_atom("rabbit@" ++ NodeHost);
-                             A ->
-                                 A
-                         end,
-            {contacting_rabbitmq, RabbitNode, pong} =
-                {contacting_rabbitmq, RabbitNode, net_adm:ping(RabbitNode)},
-            error_logger:info_report({contacted_rabbitmq, RabbitNode}),
-            put(rabbitmq_node, RabbitNode),
-            ok;
-        _ ->
-            ok
-    end.
+ensure_connection_to_rabbitmq( Host, RabbitNode ) ->
+	timer:sleep(?RABBITMQ_HEARTBEAT),
+	case net_adm:ping( RabbitNode ) of
+		pong ->
+			ensure_connection_to_rabbitmq(Host, RabbitNode);
+		pang ->
+			ensure_connection_to_rabbitmq(Host, RabbitNode, 1)
+	end.
+	
+ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
+	timer:sleep(?RABBITMQ_HEARTBEAT),
+	case net_adm:ping( RabbitNode ) of
+		pong ->
+			?INFO_MSG("The connection to rabbitmq node: ~p is ok.",[RabbitNode]),				
+			set_rabbit_node( Host, RabbitNode),
+			ensure_connection_to_rabbitmq(Host, RabbitNode);
+		pang ->
+			?WARNING_MSG("Can't connect to rabbitmq node: ~p (~p) times.~n",[RabbitNode,Times]),
+			case Times > ?ROUND_ATTEMPTS of
+				true ->
+					RabbitNode = get_rabbit_node_config(),
+					ensure_connection_to_rabbitmq(Host, RabbitNode);
+				false ->
+					ensure_connection_to_rabbitmq(Host, RabbitNode, Times+1)
+			end
+	end.
 
 %% @hidden
 handle_call(get_rabbitmq_node, _From, State) ->
@@ -121,6 +135,9 @@ handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
 
 %% @hidden
+handle_cast({set_rabbitmq_node, Node}, State) ->
+	put(rabbitmq_node, Node),
+	{noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -141,11 +158,24 @@ terminate(Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% utility
+get_rabbit_node_config() ->
+	case gen_mod:get_module_opt(global, ?MODULE, rabbitmq_node, undefined) of
+		undefined ->
+			[_NodeName, NodeHost] = string:tokens(atom_to_list(node()), "@"),
+			list_to_atom("rabbit@" ++ NodeHost);
+		A ->
+			A
+	end.
+
+set_rabbit_node( Host, Node) ->
+	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	gen_server:cast(Proc, {set_rabbitmq_node, Node} ).
+
 %%---------------------------------------------------------------------------
 
 %% @hidden
 route(From, To, Packet) ->
-    ok = contact_rabbitmq(),
     safe_route(shortcut, From, To, Packet).
 
 safe_route(ShortcutKind, From, To, Packet) ->
@@ -159,9 +189,14 @@ safe_route(ShortcutKind, From, To, Packet) ->
     end.
 
 rabbit_call(M, F, A) ->
-	?DEBUG("rabbit_call: ~p ~p ~p",[M, F, A]),
-    case rpc:call(get(rabbitmq_node), M, F, A) of
+	Node = get(rabbitmq_node),
+	?DEBUG("rabbit_call: ~p ~p ~p ~p~n",[Node, M, F, A]),   
+    case rpc:call(Node, M, F, A) of
         {badrpc, {'EXIT', Reason}} ->
+			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
+					   [Reason, {M, F, A}]),
+			{error, Reason};
+		{badrpc, Reason} ->
 			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
 					   [Reason, {M, F, A}]),
 			{error, Reason};
@@ -664,7 +699,7 @@ start_consumer(QNameBin, JID, RKBin, Server, Priority) ->
 		      ok;
 		  [] ->
 		      %% TODO: Link into supervisor
-		      Pid = spawn(?MODULE, consumer_init, [QNameBin, JID, RKBin, Server, Priority]),
+		      Pid = spawn(?MODULE, consumer_init, [QNameBin, JID, RKBin, Server, Priority, get(rabbitmq_node)]),
 		      mnesia:write(#rabbitmq_consumer_process{queue = QNameBin, pid = Pid}),
 		      ok
 	      end
@@ -695,10 +730,10 @@ with_queue(QN, Fun) ->
     end.
 
 %% @hidden
-consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
+consumer_init(QNameBin, JID, RKBin, Server, Priority, RabbitNode) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
-    ok = contact_rabbitmq(),
+	put(rabbitmq_node, RabbitNode ),
     ConsumerTag = case rabbit_call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
 					  {error, Reason} ->
 						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
