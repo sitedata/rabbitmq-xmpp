@@ -35,6 +35,7 @@
 -behaviour(gen_server).
 -behaviour(gen_mod).
 
+-compile(export_all).
 -export([start_link/2, start/2, stop/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([route/3]).
@@ -137,6 +138,7 @@ handle_call(stop, _From, State) ->
 %% @hidden
 handle_cast({set_rabbitmq_node, Node}, State) ->
 	put(rabbitmq_node, Node),
+	broadcast_new_rabbit_node_to_consumer( Node ),
 	{noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -171,6 +173,11 @@ get_rabbit_node_config() ->
 set_rabbit_node( Host, Node) ->
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 	gen_server:cast(Proc, {set_rabbitmq_node, Node} ).
+
+broadcast_new_rabbit_node_to_consumer( Node ) ->
+	Consumers = mnesia:dirty_select(rabbitmq_consumer_process, [{#rabbitmq_consumer_process{ pid='$1', _ = '_' },[],['$1']}]),
+	lists:foreach(fun(Pid) -> Pid ! {rabbitmq_node_change, Node} end, Consumers),
+	ok.
 
 %%---------------------------------------------------------------------------
 
@@ -772,6 +779,9 @@ jids_equal_upto_resource(J1, J2) ->
 consumer_main(#consumer_state{priorities = Priorities} = State) ->
     ?DEBUG("**** consumer ~p", [State]),
     receive
+	{rabbitmq_node_change, NewNode} ->
+		put(rabbitmq_node, NewNode),
+		?MODULE:consumer_main(State);	
 	{unavailable, JID, RKBin, AllResources} ->
 	    {atomic, NewState} =
 		mnesia:transaction(
