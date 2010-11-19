@@ -204,24 +204,8 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 			end
 	end.
 
-rabbit_call(M, F, A) ->
-	Node = get(rabbitmq_node),
-	?DEBUG("rabbit_call: ~p ~p ~p ~p~n",[Node, M, F, A]),   
-    case rpc:call(Node, M, F, A) of
-        {badrpc, {'EXIT', Reason}} ->
-			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
-					   [Reason, {M, F, A}]),
-			{error, Reason};
-		{badrpc, Reason} ->
-			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
-					   [Reason, {M, F, A}]),
-			{error, Reason};
-        V ->
-            V
-    end.
-
 rabbit_exchange_lookup(XN) ->
-    rabbit_call(rabbit_exchange, lookup, [XN]).
+    mod_rabbitmq_util:call(rabbit_exchange, lookup, [XN]).
 
 do_route(Host,#jid{lserver = FromServer} = From,
 		 #jid{lserver = ToServer} = To,
@@ -304,14 +288,14 @@ do_route(Host, From, To, {xmlelement, "message", _, _} = Packet) ->
 			    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
 			_ ->
                             %% FIXME: So many roundtrips!!
-                            Msg = rabbit_call(rabbit_basic, message,
+                            Msg = mod_rabbitmq_util:call(rabbit_basic, message,
                                               [?XNAME(XNameBin),
                                                RKBin,
                                                [{'content_type', <<"text/plain">>}],
                                                list_to_binary(Body)]),
-                            Delivery = rabbit_call(rabbit_basic, delivery,
+                            Delivery = mod_rabbitmq_util:call(rabbit_basic, delivery,
                                                    [false, false, none, Msg]),
-                            rabbit_call(rabbit_basic, publish, [Delivery])
+                            mod_rabbitmq_util:call(rabbit_basic, publish, [Delivery])
 		    end
 	    end
     end,
@@ -478,9 +462,9 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
 	
-	Bindings = case rabbit_call(rabbit_binding, list_for_source, [XName]) of
+	Bindings = case mod_rabbitmq_util:call(rabbit_binding, list_for_source, [XName]) of
 				   {error, Reason} ->
-					   ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+					   ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 								  [get_bound_queues, Reason]),
 					   [];
 				   V ->
@@ -495,7 +479,7 @@ unsub_all(XNameBin, ExchangeJID) ->
 	mnesia:transaction(
 	  fun () ->
 		  BoundQueues = get_bound_queues(XNameBin),
-		  rabbit_call(rabbit_exchange, delete, [?XNAME(XNameBin), false]),
+		  mod_rabbitmq_util:call(rabbit_exchange, delete, [?XNAME(XNameBin), false]),
 		  BoundQueues
 	  end),
     ?INFO_MSG("unsub_all~n~p~n~p~n~p", [XNameBin, ExchangeJID, BindingDescriptions]),
@@ -532,13 +516,13 @@ send_message(From, To, TypeStr, BodyStr) ->
     ejabberd_router:route(From, To, XmlBody).
 
 rabbit_exchange_list_queue_bindings(QN) ->
-    case rabbit_call(rabbit_binding, list_for_destination, [QN]) of
+    case mod_rabbitmq_util:call(rabbit_binding, list_for_destination, [QN]) of
 		{error, Reason} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 					   [rabbit_exchange_list_queue_bindings, Reason]),
 			[];
 		R ->
-			?DEBUG("rabbit_call in ~p return ~p~n",
+			?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 				   [rabbit_exchange_list_queue_bindings, R]),
 			R
 	end.
@@ -558,24 +542,24 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
     case rabbit_exchange_lookup(?XNAME(XNameBin)) of
 		{ok, _X} ->
 			?DEBUG("... exists", []),
-			case rabbit_call(rabbit_amqqueue, declare,
+			case mod_rabbitmq_util:call(rabbit_amqqueue, declare,
 							 [?QNAME(QNameBin), true, false, [], none]) of
 				{error, Reason} ->
-					?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+					?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 							   [check_and_bind, Reason]);
 				R ->
-					?DEBUG("rabbit_call in ~p return ~p~n",
+					?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 						   [check_and_bind, R]),
-					case rabbit_call(rabbit_binding, add,
+					case mod_rabbitmq_util:call(rabbit_binding, add,
 									 [#binding{source        = ?XNAME(XNameBin),
 											   destination   = ?QNAME(QNameBin),
 											   key           = RKBin,
 											   args          = []}]) of
 						{error, Reason} ->
-							?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+							?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 									   [check_and_bind2, Reason]);
 						R1 ->
-							?DEBUG("rabbit_call in ~p return ~p~n",
+							?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 								   [check_and_bind2, R1])
 					end
 			end,			
@@ -589,7 +573,7 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     XName = ?XNAME(XNameBin),
     QName = ?QNAME(QNameBin),
-    case rabbit_call(rabbit_binding, remove,
+    case mod_rabbitmq_util:call(rabbit_binding, remove,
                      [#binding{source        = XName,
                                destination   = QName,
                                key           = RKBin,
@@ -598,7 +582,7 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
 	    ?DEBUG("... queue or exchange not found: ~p. Ignoring", [_Reason]),
 	    no_subscriptions_left;
 	R ->
-		?DEBUG("rabbit_call in ~p return ~p~n",
+		?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 			   [check_and_bind, R]),
 
 	    ?DEBUG("... checking count of remaining bindings ...", []),
@@ -606,24 +590,24 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
 	    case length(rabbit_exchange_list_queue_bindings(QName)) of
 		0 ->
 		    ?DEBUG("... and deleting", []),
-		    case rabbit_call(rabbit_amqqueue, lookup, [QName]) of					
+		    case mod_rabbitmq_util:call(rabbit_amqqueue, lookup, [QName]) of					
 				{ok, Q} -> 
-					?DEBUG("rabbit_call in ~p return ~p~n",
+					?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 						   [unbind_and_delete, Q]),					
-					case rabbit_call(rabbit_amqqueue, delete, [Q, false, false]) of
+					case mod_rabbitmq_util:call(rabbit_amqqueue, delete, [Q, false, false]) of
 						{error, Reason} ->
-							?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+							?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 									   [unbind_and_delete, Reason]);
 						R ->
-							?DEBUG("rabbit_call in ~p return ~p~n",
+							?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 								   [unbind_and_delete, R])
 					end;
 				{error, not_found} -> 
-					?DEBUG("rabbit_call in ~p return ~p~n",
+					?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 						   [unbind_and_delete, not_found]),
 					ok;
 				{error, Reason} ->
-					?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+					?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 							   [unbind_and_delete, Reason])
 		    end,
 		    ?DEBUG("... deletion complete.", []),
@@ -656,9 +640,9 @@ all_exchanges() ->
 	XNameBin =/= <<>>].
 
 rabbit_exchanges() ->
-	case rabbit_call(rabbit_exchange, list, [?VHOST]) of
+	case mod_rabbitmq_util:call(rabbit_exchange, list, [?VHOST]) of
 		{error, Reason} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 					   [rabbit_exchanges, Reason]),
 			[];
 		R ->
@@ -666,13 +650,13 @@ rabbit_exchanges() ->
 	end.
 
 rabbit_amqqueues() ->
-	case rabbit_call(rabbit_amqqueue, list, [?VHOST]) of
+	case mod_rabbitmq_util:call(rabbit_amqqueue, list, [?VHOST]) of
 		{error, Reason} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 					   [rabbit_amqqueues, Reason]),
 			[];
 		R ->
-			?DEBUG("rabbit_call in ~p return ~p~n",[rabbit_amqqueues, R]),
+			?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",[rabbit_amqqueues, R]),
 			R
 	end.
 
@@ -831,14 +815,14 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 	"amq." ++ _ ->
 	    {ok, "Names may not start with 'amq.'."};
 	_ ->
-	    case rabbit_call(rabbit_exchange, check_type,
+	    case mod_rabbitmq_util:call(rabbit_exchange, check_type,
 						 [list_to_binary(get_arg(ParsedArgs, type, "fanout"))]) of
 			{error, Reason} ->
-				?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+				?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 						   [do_command_declare, Reason]),
 				{error, "Bad exchange type."};
 			TypeAtom ->
-				#exchange{} = rabbit_call(rabbit_exchange, declare,
+				#exchange{} = mod_rabbitmq_util:call(rabbit_exchange, declare,
 										  [?XNAME(list_to_binary(NameStr)),
 										   TypeAtom,
 										   get_arg(ParsedArgs, durable, true),

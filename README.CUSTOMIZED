@@ -1,1 +1,4 @@
 The customization in this project are as following:
+
+1 check on the connection to rabbitmq-server.
+2 broadcast rabbitmq-node change to consumer processes.

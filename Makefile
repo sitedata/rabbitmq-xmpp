@@ -26,7 +26,9 @@ ifdef debug
   EFLAGS+=+debug_info +export_all
 endif
 
-all: check_rabbit_hrl mod_rabbitmq_consumer.beam mod_rabbitmq.beam
+ERL_OBJECTS=mod_rabbitmq_util.beam mod_rabbitmq_consumer.beam mod_rabbitmq.beam
+
+all: check_rabbit_hrl $(ERL_OBJECTS)
 
 check_rabbit_hrl:
 	@if [ -e $(CANONICAL_RABBIT_HEADER) ]; then diff -q $(CANONICAL_RABBIT_HEADER) src/rabbit.hrl; else echo Skipping rabbit.hrl check because $(CANONICAL_RABBIT_HEADER) does not exist; fi

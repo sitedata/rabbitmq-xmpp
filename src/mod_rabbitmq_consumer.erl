@@ -83,26 +83,26 @@ init([Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode]) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
 	put(rabbitmq_node, RabbitNode ),
-    ConsumerTag = case rabbit_call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
+    ConsumerTag = case mod_rabbitmq_util:call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
 					  {error, Reason} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 									 [consumer_init_guid, Reason]),
 						  undefined;
 					  R ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
+						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 								 [consumer_init_guid, R]),
 						  R
 				  end,
 
 	Fun = fun(Q) ->
-				  case rabbit_call(rabbit_amqqueue, basic_consume,
+				  case mod_rabbitmq_util:call(rabbit_amqqueue, basic_consume,
 								   [Q, true, self(), undefined, ConsumerTag, false, undefined])  of
 					  {error, Reason1} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 									 [consumer_init_amqqueue, Reason1]),
 						  undefined;
 					  R1 ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
+						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 								   [consumer_init_amqqueue, R1]),
 						  R1
 				  end 
@@ -149,11 +149,8 @@ handle_cast({unavailable, JID, RKBin, AllResources},
 			{noreply, State#state{priorities = NewPriorities}}
 	end;
 
-handle_cast({deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}} = Deliver, 
+handle_cast({deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}}, 
 			#state{ priorities = Priorities} = State) ->
-	%% FROM consumer_main, no idea where is the message from,
-	%% So debug it, might delete it in the future.
-	?WARNING_MSG("consumer get deliver message: ~p ~n state: ~p~n",[Deliver, State]),
 	#basic_message{exchange_name = #resource{name = XNameBin},
 				   routing_key = RKBin,
 				   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
@@ -164,12 +161,12 @@ handle_cast({deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg
 				 TopPriorityJID,
 				 "chat",
 				 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
-	case rabbit_call(rabbit_amqqueue, notify_sent, [QPid, self()]) of
+	case mod_rabbitmq_util:call(rabbit_amqqueue, notify_sent, [QPid, self()]) of
 		{error, Reason1} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 					   [consumer_main, Reason1]);
 		R ->
-			?DEBUG("rabbit_call in ~p return ~p~n",
+			?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 				   [consumer_main, R])
 	end,
 	{noreply, State};
@@ -209,43 +206,28 @@ remove_member( Pid, JID, RKBin, AllResources ) ->
 %%
 with_queue(QN, Fun) ->
     %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
-    case rabbit_call(rabbit_amqqueue, lookup, [QN]) of
+    case mod_rabbitmq_util:call(rabbit_amqqueue, lookup, [QN]) of
         {ok, Q} ->
             Fun(Q);
 		{error, Reason} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 					   [with_queue, {QN, Reason}])
     end.
 
-rabbit_call(M, F, A) ->
-	Node = get(rabbitmq_node),
-	?DEBUG("rabbit_call in ~p: ~p ~p ~p ~p~n",[?MODULE, Node, M, F, A]),   
-    case rpc:call(Node, M, F, A) of
-        {badrpc, {'EXIT', Reason}} ->
-			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
-					   [Reason, {M, F, A}]),
-			{error, Reason};
-		{badrpc, Reason} ->
-			?ERROR_MSG("rabbit_call error ~p~nwhen processing: ~p",
-					   [Reason, {M, F, A}]),
-			{error, Reason};
-        V ->
-            V
-    end.
 
 jids_equal_upto_resource(J1, J2) ->
     jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
 
 consumer_done(QNameBin, ConsumerTag) ->
 	Fun = fun(Q) ->
-				  case rabbit_call(rabbit_amqqueue, basic_cancel,
-                                   [Q, self(), ConsumerTag, undefined]) of
+				  case mod_rabbitmq_util:call(rabbit_amqqueue, basic_cancel,
+										[Q, self(), ConsumerTag, undefined]) of
 					  {error, Reason} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
+						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
 									 [consumer_done, Reason]),
 						  undefined;
 					  R ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
+						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
 								 [consumer_init_amqqueue, R]),
 						  R
 				  end 
