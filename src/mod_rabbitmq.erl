@@ -36,10 +36,21 @@
 -behaviour(gen_mod).
 
 -compile(export_all).
--export([start_link/2, start/2, stop/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([route/4]).
--export([consumer_stopped/2]).
+
+%% API
+-export([start_link/2, 
+		 start/2, 
+		 stop/1,
+		 route/4,
+		 consumer_stopped/2]).
+
+%% gen_server callbacks
+-export([init/1, 
+		 handle_call/3, 
+		 handle_cast/2, 
+		 handle_info/2, 
+		 terminate/2, 
+		 code_change/3]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -80,9 +91,13 @@ stop(Host) ->
     supervisor:terminate_child(ejabberd_sup, Proc),
     supervisor:delete_child(ejabberd_sup, Proc).
 
-%%---------------------------------------------------------------------------
+consumer_stopped(Host, QNameBin) ->
+	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	gen_server:call(Proc, {consumer_stopped, QNameBin} ).
 
-%% @hidden
+%%
+%% gen_server callbacks
+%%
 init([Host, Opts]) ->
 	RabbitNode = get_rabbit_node_config(),
 	put(rabbitmq_node, RabbitNode),
@@ -99,6 +114,62 @@ init([Host, Opts]) ->
     {ok, #state{host = MyHost,
 				server_host = Host}}.
 
+handle_call({consumer_stopped, QNameBin}, _From, State) ->
+	?DEBUG("Consumer for ~p stopped~n", [QNameBin]),
+	delete_consumer_process( QNameBin ),
+    {reply, ok, State};
+
+handle_call(get_rabbitmq_node, _From, State) ->
+    {reply, get(rabbitmq_node), State};
+handle_call(stop, _From, State) ->
+	?DEBUG("stop , state: ~p~n",[State]),
+    {stop, normal, ok, State}.
+
+handle_cast({set_rabbitmq_node, Node}, State) ->
+	put(rabbitmq_node, Node),
+	broadcast_new_rabbit_node_to_consumer( Node ),
+	{noreply, State};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({route, From, To, Packet}, #state{server_host = Host} = State) ->
+    safe_route(Host, non_shortcut, From, To, Packet),
+    {noreply, State};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(Reason, State) ->
+	?DEBUG("terminate from ~p ~n reason ~p ~n", [State,Reason]),
+    ejabberd_router:unregister_route(State#state.host),
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%
+%% internal functions
+%%
+get_rabbit_node_config() ->
+	case gen_mod:get_module_opt(global, ?MODULE, rabbitmq_node, undefined) of
+		undefined ->
+			[_NodeName, NodeHost] = string:tokens(atom_to_list(node()), "@"),
+			list_to_atom("rabbit@" ++ NodeHost);
+		A ->
+			A
+	end.
+
+set_rabbit_node( Host, Node) ->
+	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	gen_server:cast(Proc, {set_rabbitmq_node, Node} ).
+
+broadcast_new_rabbit_node_to_consumer( Node ) ->
+	Consumers = mnesia:dirty_select(rabbitmq_consumer_process, [{#rabbitmq_consumer_process{ pid='$1', _ = '_' },[],['$1']}]),
+	lists:foreach(fun(Pid) -> mod_rabbitmq_consumer:set_rabbitmq_node(Pid, Node) end, Consumers),
+	ok.
+
+%%
+%% Heartbeat functions
+%%
 ensure_connection_to_rabbitmq( Host, RabbitNode ) ->
 	timer:sleep(?RABBITMQ_HEARTBEAT),
 	case net_adm:ping( RabbitNode ) of
@@ -126,70 +197,6 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 			end
 	end.
 
-%% @hidden
-
-handle_call({consumer_stopped, QNameBin}, _From, State) ->
-	?DEBUG("Consumer for ~p stopped~n", [QNameBin]),
-	delete_consumer_process( QNameBin ),
-    {reply, ok, State};
-
-handle_call(get_rabbitmq_node, _From, State) ->
-    {reply, get(rabbitmq_node), State};
-handle_call(stop, _From, State) ->
-	?DEBUG("stop , state: ~p~n",[State]),
-    {stop, normal, ok, State}.
-
-%% @hidden
-handle_cast({set_rabbitmq_node, Node}, State) ->
-	put(rabbitmq_node, Node),
-	broadcast_new_rabbit_node_to_consumer( Node ),
-	{noreply, State};
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @hidden
-handle_info({route, From, To, Packet}, #state{server_host = Host} = State) ->
-    safe_route(Host, non_shortcut, From, To, Packet),
-    {noreply, State};
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @hidden
-terminate(Reason, State) ->
-	?DEBUG("terminate from ~p ~n reason ~p ~n", [State,Reason]),
-    ejabberd_router:unregister_route(State#state.host),
-    ok.
-
-%% @hidden
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%% utility
-get_rabbit_node_config() ->
-	case gen_mod:get_module_opt(global, ?MODULE, rabbitmq_node, undefined) of
-		undefined ->
-			[_NodeName, NodeHost] = string:tokens(atom_to_list(node()), "@"),
-			list_to_atom("rabbit@" ++ NodeHost);
-		A ->
-			A
-	end.
-
-set_rabbit_node( Host, Node) ->
-	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
-	gen_server:cast(Proc, {set_rabbitmq_node, Node} ).
-
-broadcast_new_rabbit_node_to_consumer( Node ) ->
-	Consumers = mnesia:dirty_select(rabbitmq_consumer_process, [{#rabbitmq_consumer_process{ pid='$1', _ = '_' },[],['$1']}]),
-	lists:foreach(fun(Pid) -> mod_rabbitmq_consumer:set_rabbitmq_node(Pid, Node) end, Consumers),
-	ok.
-
-consumer_stopped(Host, QNameBin) ->
-	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
-	gen_server:call(Proc, {consumer_stopped, QNameBin} ).
-	
-%%---------------------------------------------------------------------------
-
-%% @hidden
 route(Host, From, To, Packet) ->
     safe_route(Host, shortcut, From, To, Packet).
 
