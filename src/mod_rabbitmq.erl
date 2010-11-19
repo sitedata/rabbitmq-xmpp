@@ -41,7 +41,6 @@
 -export([start_link/2, 
 		 start/2, 
 		 stop/1,
-		 route/4,
 		 consumer_stopped/2]).
 
 %% gen_server callbacks
@@ -132,9 +131,17 @@ handle_cast({set_rabbitmq_node, Node}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({route, From, To, Packet}, #state{server_host = Host} = State) ->
-    safe_route(Host, non_shortcut, From, To, Packet),
+handle_info({route, From, To, Packet}, 
+			#state{server_host = Host} = State) ->
+    case catch do_route(Host, From, To, Packet) of
+		{'EXIT', Reason} ->
+			?ERROR_MSG("~p~nwhen processing: ~p",
+					   [Reason, {From, To, Packet}]);
+		_ ->
+			ok
+	end,
     {noreply, State};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -196,19 +203,6 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 					ensure_connection_to_rabbitmq(Host, RabbitNode, Times+1)
 			end
 	end.
-
-route(Host, From, To, Packet) ->
-    safe_route(Host, shortcut, From, To, Packet).
-
-safe_route(Host, ShortcutKind, From, To, Packet) ->
-    ?DEBUG("~p~n~p ->~n~p~n~p", [ShortcutKind, From, To, Packet]),
-    case catch do_route(Host, From, To, Packet) of
-	{'EXIT', Reason} ->
-	    ?ERROR_MSG("~p~nwhen processing: ~p",
-		       [Reason, {From, To, Packet}]);
-	_ ->
-	    ok
-    end.
 
 rabbit_call(M, F, A) ->
 	Node = get(rabbitmq_node),
