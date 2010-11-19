@@ -38,8 +38,8 @@
 -compile(export_all).
 -export([start_link/2, start/2, stop/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([route/3]).
--export([consumer_init/6, consumer_main/1]).
+-export([route/4]).
+-export([consumer_stopped/2]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -49,9 +49,9 @@
 -define(XNAME(Name), #resource{virtual_host = ?VHOST, kind = exchange, name = Name}).
 -define(QNAME(Name), #resource{virtual_host = ?VHOST, kind = queue, name = Name}).
 
--record(state, {host}).
+-record(state, {host,
+				server_host}).
 -record(rabbitmq_consumer_process, {queue, pid}).
--record(consumer_state, {lserver, consumer_tag, queue, priorities}).
 
 -define(PROCNAME, ejabberd_mod_rabbitmq).
 -define(TABLENAME, ?PROCNAME).
@@ -60,12 +60,10 @@
 -define(RABBITMQ_HEARTBEAT, 5000).
 -define(ROUND_ATTEMPTS, 5).
 
-%% @hidden
 start_link(Host, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
 
-%% @hidden
 start(Host, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     ChildSpec = {Proc,
@@ -76,7 +74,6 @@ start(Host, Opts) ->
 		 [?MODULE]},
     supervisor:start_child(ejabberd_sup, ChildSpec).
 
-%% @hidden
 stop(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:call(Proc, stop),
@@ -99,7 +96,8 @@ init([Host, Opts]) ->
 
     probe_queues(MyHost),
 
-    {ok, #state{host = MyHost}}.
+    {ok, #state{host = MyHost,
+				server_host = Host}}.
 
 ensure_connection_to_rabbitmq( Host, RabbitNode ) ->
 	timer:sleep(?RABBITMQ_HEARTBEAT),
@@ -129,6 +127,12 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 	end.
 
 %% @hidden
+
+handle_call({consumer_stopped, QNameBin}, _From, State) ->
+	?DEBUG("Consumer for ~p stopped~n", [QNameBin]),
+	delete_consumer_process( QNameBin ),
+    {reply, ok, State};
+
 handle_call(get_rabbitmq_node, _From, State) ->
     {reply, get(rabbitmq_node), State};
 handle_call(stop, _From, State) ->
@@ -144,8 +148,8 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @hidden
-handle_info({route, From, To, Packet}, State) ->
-    safe_route(non_shortcut, From, To, Packet),
+handle_info({route, From, To, Packet}, #state{server_host = Host} = State) ->
+    safe_route(Host, non_shortcut, From, To, Packet),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -176,18 +180,22 @@ set_rabbit_node( Host, Node) ->
 
 broadcast_new_rabbit_node_to_consumer( Node ) ->
 	Consumers = mnesia:dirty_select(rabbitmq_consumer_process, [{#rabbitmq_consumer_process{ pid='$1', _ = '_' },[],['$1']}]),
-	lists:foreach(fun(Pid) -> Pid ! {rabbitmq_node_change, Node} end, Consumers),
+	lists:foreach(fun(Pid) -> mod_rabbitmq_consumer:set_rabbitmq_node(Pid, Node) end, Consumers),
 	ok.
 
+consumer_stopped(Host, QNameBin) ->
+	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	gen_server:call(Proc, {consumer_stopped, QNameBin} ).
+	
 %%---------------------------------------------------------------------------
 
 %% @hidden
-route(From, To, Packet) ->
-    safe_route(shortcut, From, To, Packet).
+route(Host, From, To, Packet) ->
+    safe_route(Host, shortcut, From, To, Packet).
 
-safe_route(ShortcutKind, From, To, Packet) ->
+safe_route(Host, ShortcutKind, From, To, Packet) ->
     ?DEBUG("~p~n~p ->~n~p~n~p", [ShortcutKind, From, To, Packet]),
-    case catch do_route(From, To, Packet) of
+    case catch do_route(Host, From, To, Packet) of
 	{'EXIT', Reason} ->
 	    ?ERROR_MSG("~p~nwhen processing: ~p",
 		       [Reason, {From, To, Packet}]);
@@ -214,15 +222,15 @@ rabbit_call(M, F, A) ->
 rabbit_exchange_lookup(XN) ->
     rabbit_call(rabbit_exchange, lookup, [XN]).
 
-do_route(#jid{lserver = FromServer} = From,
-	 #jid{lserver = ToServer} = To,
-	 {xmlelement, "presence", _, _})
+do_route(Host,#jid{lserver = FromServer} = From,
+		 #jid{lserver = ToServer} = To,
+		 {xmlelement, "presence", _, _})
   when FromServer == ToServer ->
     %% Break tight loops by ignoring these presence packets.
     ?WARNING_MSG("Tight presence loop between~n~p and~n~p~nbroken.",
 		 [From, To]),
     ok;
-do_route(From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) ->
+do_route(Host, From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) ->
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
 	    send_presence(To, From, "unsubscribed");
@@ -239,7 +247,7 @@ do_route(From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) -
 	    ?INFO_MSG("Other kind of presence for empty-user JID~n~p", [Packet])
     end,
     ok;
-do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
+do_route(Host, From, To, {xmlelement, "presence", _, _} = Packet) ->
     QNameBin = jid_to_qname(From),
     {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
@@ -264,9 +272,9 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
 	    maybe_unsub(From, To, XNameBin, RKBin, QNameBin);
 
 	"" ->
-	    start_consumer(QNameBin, From, RKBin, To#jid.lserver, extract_priority(Packet));
+	    add_consumer_member(Host, QNameBin, From, RKBin, To#jid.lserver, extract_priority(Packet));
 	"unavailable" ->
-	    stop_consumer(QNameBin, From, RKBin, false);
+	    remove_consumer_member(QNameBin, From, RKBin, false);
 
 	"probe" ->
 	    case is_subscribed(XNameBin, RKBin, QNameBin) of
@@ -280,7 +288,7 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
 	    ?INFO_MSG("Other kind of presence~n~p", [Packet])
     end,
     ok;
-do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
+do_route(Host, From, To, {xmlelement, "message", _, _} = Packet) ->
     case xml:get_subtag_cdata(Packet, "body") of
 	"" ->
 	    ?DEBUG("Ignoring message with empty body", []);
@@ -307,7 +315,7 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 	    end
     end,
     ok;
-do_route(From, To, {xmlelement, "iq", _, Els0} = Packet) ->
+do_route(Host, From, To, {xmlelement, "iq", _, Els0} = Packet) ->
     Els = xml:remove_cdata(Els0),
     IqId = xml:get_tag_attr_s("id", Packet),
     case xml:get_tag_attr_s("type", Packet) of
@@ -317,7 +325,7 @@ do_route(From, To, {xmlelement, "iq", _, Els0} = Packet) ->
 			      [Other, From, To, Packet])
     end,
     ok;
-do_route(_From, _To, _Packet) ->
+do_route(_Host, _From, _To, _Packet) ->
     ?INFO_MSG("**** DROPPED~n~p~n~p~n~p", [_From, _To, _Packet]),
     ok.
 
@@ -460,7 +468,7 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
     send_presence(XJID, QJID, "unsubscribe"),
     case unbind_and_delete(XNameBin, RKBin, QNameBin) of
 	no_subscriptions_left ->
-	    stop_consumer(QNameBin, QJID, none, true),
+	    remove_consumer_member(QNameBin, QJID, none, true),
 	    ok;
 	subscriptions_remain ->
 	    ok
@@ -697,174 +705,46 @@ probe_bindings(Server, JID, [#binding{source = #resource{name = XNameBin}} | Res
 probe_bindings(Server, JID, Arg ) ->
 	?ERROR_MSG("probe_bindings: unknown calling : ~p ~p ~n ~p ~n",[Server, JID, Arg]).
 
-start_consumer(QNameBin, JID, RKBin, Server, Priority) ->
-    mnesia:transaction(
-      fun () ->
-	      case mnesia:read({rabbitmq_consumer_process, QNameBin}) of
-		  [#rabbitmq_consumer_process{pid = Pid}] ->
-		      Pid ! {presence, JID, RKBin, Priority},
-		      ok;
-		  [] ->
-		      %% TODO: Link into supervisor
-		      Pid = spawn(?MODULE, consumer_init, [QNameBin, JID, RKBin, Server, Priority, get(rabbitmq_node)]),
-		      mnesia:write(#rabbitmq_consumer_process{queue = QNameBin, pid = Pid}),
-		      ok
-	      end
-      end),
-    ok.
+add_consumer_member(Host, QNameBin, JID, RKBin, Server, Priority) ->
+	Pid = case get_consumer_process( QNameBin ) of
+			  undefined ->
+				  new_consumer_process( Host, QNameBin, JID, RKBin, Server, Priority );
+			  Pid1 ->
+				  Pid1
+		  end,
+	mod_rabbitmq_consumer:add_member(Pid, JID, RKBin, Priority).
 
-stop_consumer(QNameBin, JID, RKBin, AllResources) ->
-    mnesia:transaction(
-      fun () ->
-	      case mnesia:read({rabbitmq_consumer_process, QNameBin}) of
-		  [#rabbitmq_consumer_process{pid = Pid}] ->
-		      Pid ! {unavailable, JID, RKBin, AllResources},
-		      ok;
-		  [] ->
-		      ok
-	      end
-      end),
-    ok.
+remove_consumer_member(QNameBin, JID, RKBin, AllResources) ->
+	case get_consumer_process( QNameBin ) of
+		undefined ->
+			?WARNING_MSG("no consumer process, why remove? ~p~n",
+						 [{QNameBin, JID, RKBin, AllResources}]);
+		Pid ->
+			mod_rabbitmq_consumer:remove_member( Pid, JID, RKBin, AllResources)
+	end.
 
-with_queue(QN, Fun) ->
-    %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
-    case rabbit_call(rabbit_amqqueue, lookup, [QN]) of
-        {ok, Q} ->
-            Fun(Q);
-		{error, Reason} ->
-			?ERROR_MSG("rabbit_call error in ~p~n~p~n",
-					   [with_queue, Reason])
-    end.
+get_consumer_process( QNameBin ) ->
+	case mnesia:dirty_read({rabbitmq_consumer_process, QNameBin}) of
+		[#rabbitmq_consumer_process{pid = Pid}] ->
+			Pid;
+		[] ->
+			undefined
+	end.
 
-%% @hidden
-consumer_init(QNameBin, JID, RKBin, Server, Priority, RabbitNode) ->
-    ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
-	      [QNameBin, JID, Priority, RKBin]),
-	put(rabbitmq_node, RabbitNode ),
-    ConsumerTag = case rabbit_call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
-					  {error, Reason} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
-									 [consumer_init_guid, Reason]),
-						  undefined;
-					  R ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
-								 [consumer_init_guid, R]),
-						  R
-				  end,
+new_consumer_process( Host, QNameBin, JID, RKBin, Server, Priority ) ->
+	{ok, Pid} = mod_rabbitmq_consumer:start(Host, QNameBin, JID, RKBin, 
+											Server, Priority, get(rabbitmq_node)),
+	mnesia:transaction( 
+	  fun() ->
+			  mnesia:write(#rabbitmq_consumer_process{queue = QNameBin, pid = Pid})
+	  end),
+	Pid.
 
-	Fun = fun(Q) ->
-				  case rabbit_call(rabbit_amqqueue, basic_consume,
-								   [Q, true, self(), undefined, ConsumerTag, false, undefined])  of
-					  {error, Reason1} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
-									 [consumer_init_amqqueue, Reason1]),
-						  undefined;
-					  R1 ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
-								   [consumer_init_amqqueue, R1]),
-						  R1
-				  end 
-		  end,				  
-    with_queue(?QNAME(QNameBin),Fun),
-
-    ?MODULE:consumer_main(#consumer_state{lserver = Server,
-					  consumer_tag = ConsumerTag,
-					  queue = QNameBin,
-					  priorities = [{-Priority, {JID, RKBin}}]}).
-
-jids_equal_upto_resource(J1, J2) ->
-    jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
-
-%% @hidden
-consumer_main(#consumer_state{priorities = Priorities} = State) ->
-    ?DEBUG("**** consumer ~p", [State]),
-    receive
-	{rabbitmq_node_change, NewNode} ->
-		put(rabbitmq_node, NewNode),
-		?MODULE:consumer_main(State);	
-	{unavailable, JID, RKBin, AllResources} ->
-	    {atomic, NewState} =
-		mnesia:transaction(
-		  fun () ->
-			  NewPriorities =
-			      case AllResources of
-				  true ->
-				      [E || E = {_, {J, _}} <- Priorities,
-					    not jids_equal_upto_resource(J, JID)];
-				  false ->
-				      lists:keydelete({JID, RKBin}, 2, Priorities)
-			      end,
-			  case NewPriorities of
-			      [] ->
-				  mnesia:delete({rabbitmq_consumer_process,
-						 State#consumer_state.queue}),
-				  terminate;
-			      _ ->
-				  State#consumer_state{priorities = NewPriorities}
-			  end
-		  end),
-	    case NewState of
-		terminate ->
-		    ?INFO_MSG("**** terminating consumer~n~p", [State#consumer_state.queue]),
-		    consumer_done(State#consumer_state{priorities = []}),
-		    done;
-		_ ->
-		    ?MODULE:consumer_main(NewState)
-	    end;
-	{presence, JID, RKBin, Priority} ->
-	    NewPriorities = lists:keysort(1, keystore({JID, RKBin}, 2, Priorities,
-						      {-Priority, {JID, RKBin}})),
-	    ?MODULE:consumer_main(State#consumer_state{priorities = NewPriorities});
-	{'$gen_cast', {deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}}} ->
-			#basic_message{exchange_name = #resource{name = XNameBin},
-						   routing_key = RKBin,
-						   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
-			[{_, {TopPriorityJID, _}} | _] = Priorities,
-			send_message(jlib:make_jid(binary_to_list(XNameBin),
-									   State#consumer_state.lserver,
-									   binary_to_list(RKBin)),
-						 TopPriorityJID,
-						 "chat",
-						 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
-            case rabbit_call(rabbit_amqqueue, notify_sent, [QPid, self()]) of
-				{error, Reason1} ->
-					?ERROR_MSG("rabbit_call error in ~p~n~p~n",
-							   [consumer_main, Reason1]);
-				R ->
-					?DEBUG("rabbit_call in ~p return ~p~n",
-						   [consumer_main, R])
-			end,
-			?MODULE:consumer_main(State);
-	Other ->
-	    ?INFO_MSG("Consumer main ~p got~n~p", [State#consumer_state.queue, Other]),
-	    ?MODULE:consumer_main(State)
-    end.
-
-%% implementation from R12B-0. When we drop support for R11B, we can
-%% use the system's implementation.
-keystore(Key, N, [H|T], New) when element(N, H) == Key ->
-    [New|T];
-keystore(Key, N, [H|T], New) ->
-    [H|keystore(Key, N, T, New)];
-keystore(_Key, _N, [], New) ->
-    [New].
-
-consumer_done(#consumer_state{queue = QNameBin, consumer_tag = ConsumerTag}) ->
-	Fun = fun(Q) ->
-				  case rabbit_call(rabbit_amqqueue, basic_cancel,
-                                   [Q, self(), ConsumerTag, undefined]) of
-					  {error, Reason} ->
-						  ?ERROR_MSG("rabbit_call error in ~p~n~p~n",
-									 [consumer_done, Reason]),
-						  undefined;
-					  R ->
-						  ?DEBUG("rabbit_call in ~p return ~p~n",
-								 [consumer_init_amqqueue, R]),
-						  R
-				  end 
-		  end,	
-    with_queue(?QNAME(QNameBin), Fun),
-    ok.
+delete_consumer_process( QNameBin ) ->
+	mnesia:transaction( 
+	  fun() ->			  
+			  mnesia:delete({rabbitmq_consumer_process, QNameBin})
+	  end).
 
 parse_command(Str) ->
     [Cmd | Args] = string:tokens(Str, " "),
