@@ -54,10 +54,6 @@
 -include("jlib.hrl").
 -include("rabbit.hrl").
 
--define(VHOST, <<"/">>).
--define(XNAME(Name), #resource{virtual_host = ?VHOST, kind = exchange, name = Name}).
--define(QNAME(Name), #resource{virtual_host = ?VHOST, kind = queue, name = Name}).
-
 -record(state, { lserver, 
 				 consumer_tag, 
 				 queue, 
@@ -83,31 +79,9 @@ init([Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode]) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
 	put(rabbitmq_node, RabbitNode ),
-    ConsumerTag = case mod_rabbitmq_util:call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
-					  {error, Reason} ->
-						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
-									 [consumer_init_guid, Reason]),
-						  undefined;
-					  R ->
-						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
-								 [consumer_init_guid, R]),
-						  R
-				  end,
-
-	Fun = fun(Q) ->
-				  case mod_rabbitmq_util:call(rabbit_amqqueue, basic_consume,
-								   [Q, true, self(), undefined, ConsumerTag, false, undefined])  of
-					  {error, Reason1} ->
-						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
-									 [consumer_init_amqqueue, Reason1]),
-						  undefined;
-					  R1 ->
-						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
-								   [consumer_init_amqqueue, R1]),
-						  R1
-				  end 
-		  end,				  
-    with_queue(?QNAME(QNameBin),Fun),
+	
+    ConsumerTag = mod_rabbitmq_util:get_binstring_guid(),
+	mod_rabbitmq_util:basic_consume( QNameBin, ConsumerTag ),
 
     {ok, #state{lserver = Server,
 				consumer_tag = ConsumerTag,
@@ -183,8 +157,8 @@ terminate(Reason,
 				 consumer_tag = ConsumerTag,
 				 server_host = Host} = State) ->
 	?DEBUG("terminate from ~p ~n reason ~p ~n", [State,Reason]),
+	mod_rabbitmq_util:cancel_consume( QNameBin, ConsumerTag ),
 	mod_rabbitmq:consumer_stopped(Host, QNameBin ),
-	consumer_done(QNameBin, ConsumerTag),
     ok.
 
 %% @hidden
@@ -204,36 +178,9 @@ remove_member( Pid, JID, RKBin, AllResources ) ->
 %%
 %% internal functions
 %%
-with_queue(QN, Fun) ->
-    %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
-    case mod_rabbitmq_util:call(rabbit_amqqueue, lookup, [QN]) of
-        {ok, Q} ->
-            Fun(Q);
-		{error, Reason} ->
-			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
-					   [with_queue, {QN, Reason}])
-    end.
-
 
 jids_equal_upto_resource(J1, J2) ->
     jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
-
-consumer_done(QNameBin, ConsumerTag) ->
-	Fun = fun(Q) ->
-				  case mod_rabbitmq_util:call(rabbit_amqqueue, basic_cancel,
-										[Q, self(), ConsumerTag, undefined]) of
-					  {error, Reason} ->
-						  ?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
-									 [consumer_done, Reason]),
-						  undefined;
-					  R ->
-						  ?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",
-								 [consumer_init_amqqueue, R]),
-						  R
-				  end 
-		  end,	
-    with_queue(?QNAME(QNameBin), Fun),
-    ok.
 
 send_message(From, To, TypeStr, BodyStr) ->
     XmlBody = {xmlelement, "message",

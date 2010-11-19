@@ -36,6 +36,9 @@
 
 %% API
 -export([call/3]).
+-export([get_binstring_guid/0,
+		 basic_consume/2,
+		 cancel_consume/2]).
 
 -include("ejabberd.hrl").
 -include("rabbit.hrl").
@@ -45,6 +48,67 @@
 -define(QNAME(Name), #resource{virtual_host = ?VHOST, kind = queue, name = Name}).
 
 call(M, F, A) ->
+	rabbit_call(M, F, A).
+
+%%
+%% internal functions
+%%
+basic_consume( QNameBin , ConsumerTag )->
+	QName = ?QNAME( QNameBin ),
+	{ok, Queue} = get_queue( QName ),
+	case rabbit_call(rabbit_amqqueue, basic_consume,
+					 [Queue, true, self(), undefined, ConsumerTag, false, undefined])  of
+		{error, Reason} ->
+			?ERROR_MSG("basic_consume error ~p~n",[Reason]),
+			undefined;
+		R ->
+			?DEBUG("basic_consume return ~p~n",[R]),
+			R
+	end.
+cancel_consume( QNameBin, ConsumerTag ) ->
+	QName = ?QNAME( QNameBin ),
+	{ok, Queue} = get_queue( QName ),
+	case rabbit_call(rabbit_amqqueue, basic_cancel,
+					 [Queue, self(), ConsumerTag, undefined]) of
+		{error, Reason} ->
+			?ERROR_MSG("basic_cancel error ~p~n",[Reason]),
+			undefined;
+		R ->
+			?DEBUG("basic_cancel return ~p~n",[R]),
+			R
+	end.
+
+get_binstring_guid() ->
+	case rabbit_call(rabbit_guid, binstring_guid, ["amq.xmpp"]) of
+		{error, Reason} ->
+			?ERROR_MSG("get_binstring_guid error, reason:~p~n", [Reason]),
+			undefined;
+		R ->
+			?DEBUG("get_binstring_guid return ~p~n",[R]),
+			R
+	end.
+
+with_queue(QN, Fun) ->
+    %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
+    case mod_rabbitmq_util:call(rabbit_amqqueue, lookup, [QN]) of
+        {ok, Q} ->
+            Fun(Q);
+		{error, Reason} ->
+			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
+					   [with_queue, {QN, Reason}])
+    end.
+
+get_queue( QName ) ->
+	case rabbit_call(rabbit_amqqueue, lookup, [QName]) of
+		{error, Reason} ->
+			?ERROR_MSG("lookup error ~p~n",[Reason]),
+			undefined;
+		R ->
+			?DEBUG("lookup return ~p~n",[R]),
+			R
+	end.
+
+rabbit_call(M, F, A) ->
 	%% FIXME: why use rabbitmq_node?
 	Node = get(rabbitmq_node),
 	?DEBUG("rabbit_call in ~p: ~p ~p ~p ~p~n",[?MODULE, Node, M, F, A]),   
