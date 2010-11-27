@@ -89,16 +89,6 @@ get_binstring_guid() ->
 			R
 	end.
 
-with_queue(QN, Fun) ->
-    %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
-    case mod_rabbitmq_util:call(rabbit_amqqueue, lookup, [QN]) of
-        {ok, Q} ->
-            Fun(Q);
-		{error, Reason} ->
-			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
-					   [with_queue, {QN, Reason}])
-    end.
-
 get_queue( QName ) ->
 	case rabbit_call(rabbit_amqqueue, lookup, [QName]) of
 		{error, Reason} ->
