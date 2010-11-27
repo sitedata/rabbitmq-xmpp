@@ -234,12 +234,10 @@ do_route(Host, From, To, {xmlelement, "presence", _, _} = Packet) ->
     {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
-			case mod_rabbitmq_util:get_exchange( XNameBin ) of
-				undefined ->
-					?DEBUG("~p not present ~n", [XNameBin]),
+			case is_bound( XNameBin ) of
+				false ->
 					send_presence(To, From, "unsubscribed");
-				Exchange ->
-					?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
+				true ->
 					send_presence(To, From, "subscribe")
 			end;
 	"subscribed" ->
@@ -367,12 +365,13 @@ disco_info_module(_Server) ->
 			    "http://jabber.org/protocol/disco#items"])}.
 
 disco_info_exchange(XNameBin, _RKBin) ->
+	?DEBUG("disco_info_exchange: ~p ", [XNameBin]),
     Tail = 	case mod_rabbitmq_util:get_exchange( XNameBin ) of
 				undefined ->
-					?DEBUG("~p not present ~n", [XNameBin]),
+					?DEBUG("... not present ~n", []),
 					[];
 				Exchange = #exchange{type = TypeAtom} ->
-					?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
+					?DEBUG("... exists, exchange: ~p~n", [Exchange]),
 					["amqp-exchange-" ++ atom_to_list(TypeAtom)]
 			end,
 	{ok, disco_info_result([{"component", "bot", "AMQP Exchange"},
@@ -540,14 +539,25 @@ is_subscribed(XNameBin, RKBin, QNameBin) ->
 		      false
 	      end, rabbit_exchange_list_queue_bindings(?QNAME(QNameBin))).
 
+is_bound( XNameBin ) ->
+	?DEBUG("is_bound: checking ~p ", [XNameBin]),
+	case mod_rabbitmq_util:get_exchange( XNameBin) of
+		undefined ->
+			?DEBUG("... not bound.~n",[]),
+			false;
+		_E ->
+			?DEBUG("... is bound.~n",[]),
+			true
+	end.			
+							 
 check_and_bind(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
 	case mod_rabbitmq_util:get_exchange( XNameBin ) of
 		undefined ->
-			?DEBUG("~p not present ~n", [XNameBin]),
+			?DEBUG("... not present ~n", [XNameBin]),
 			false;
 		Exchange ->
-			?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
+			?DEBUG("... exists, exchange: ~p~n", [Exchange]),
 			case mod_rabbitmq_util:call(rabbit_amqqueue, declare,
 							 [?QNAME(QNameBin), true, false, [], none]) of
 				{error, Reason} ->
