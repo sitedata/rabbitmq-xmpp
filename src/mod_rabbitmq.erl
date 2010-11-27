@@ -204,9 +204,6 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 			end
 	end.
 
-rabbit_exchange_lookup(XN) ->
-    mod_rabbitmq_util:call(rabbit_exchange, lookup, [XN]).
-
 do_route(Host,#jid{lserver = FromServer} = From,
 		 #jid{lserver = ToServer} = To,
 		 {xmlelement, "presence", _, _})
@@ -237,10 +234,14 @@ do_route(Host, From, To, {xmlelement, "presence", _, _} = Packet) ->
     {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
-	    case rabbit_exchange_lookup(?XNAME(XNameBin)) of
-		{ok, _X} -> send_presence(To, From, "subscribe");
-		{error, not_found} -> send_presence(To, From, "unsubscribed")
-	    end;
+			case mod_rabbitmq_util:get_exchange( XNameBin ) of
+				undefined ->
+					?DEBUG("~p not present ~n", [XNameBin]),
+					send_presence(To, From, "unsubscribed");
+				Exchange ->
+					?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
+					send_presence(To, From, "subscribe")
+			end;
 	"subscribed" ->
 	    case check_and_bind(XNameBin, RKBin, QNameBin) of
 		true ->
@@ -366,16 +367,18 @@ disco_info_module(_Server) ->
 			    "http://jabber.org/protocol/disco#items"])}.
 
 disco_info_exchange(XNameBin, _RKBin) ->
-    Tail = case rabbit_exchange_lookup(?XNAME(XNameBin)) of
-	       {ok, #exchange{type = TypeAtom}} ->
-		   ["amqp-exchange-" ++ atom_to_list(TypeAtom)];
-	       {error, not_found} ->
-		   []
-	   end,
-    {ok, disco_info_result([{"component", "bot", "AMQP Exchange"},
-			    {"hierarchy", "leaf", ""},
-			    "amqp-exchange"
-			    | Tail])}.
+    Tail = 	case mod_rabbitmq_util:get_exchange( XNameBin ) of
+				undefined ->
+					?DEBUG("~p not present ~n", [XNameBin]),
+					[];
+				Exchange = #exchange{type = TypeAtom} ->
+					?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
+					["amqp-exchange-" ++ atom_to_list(TypeAtom)]
+			end,
+	{ok, disco_info_result([{"component", "bot", "AMQP Exchange"},
+							{"hierarchy", "leaf", ""},
+							"amqp-exchange"
+							| Tail])}.
 
 disco_items_module(Server) ->
     {ok, disco_items_result([jlib:make_jid(XNameStr, Server, "")
@@ -539,9 +542,12 @@ is_subscribed(XNameBin, RKBin, QNameBin) ->
 
 check_and_bind(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
-    case rabbit_exchange_lookup(?XNAME(XNameBin)) of
-		{ok, _X} ->
-			?DEBUG("... exists", []),
+	case mod_rabbitmq_util:get_exchange( XNameBin ) of
+		undefined ->
+			?DEBUG("~p not present ~n", [XNameBin]),
+			false;
+		Exchange ->
+			?DEBUG("~p exists, exchange: ~p~n", [XNameBin, Exchange]),
 			case mod_rabbitmq_util:call(rabbit_amqqueue, declare,
 							 [?QNAME(QNameBin), true, false, [], none]) of
 				{error, Reason} ->
@@ -563,10 +569,7 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 								   [check_and_bind2, R1])
 					end
 			end,			
-			true;
-	{error, not_found} ->
-	    ?DEBUG("... not present", []),
-	    false
+			true
     end.
 
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->

@@ -2,7 +2,6 @@ This project was initially forked from http://hg.rabbitmq.com/rabbitmq-xmpp/, wh
 
 This project is created for corresponding with the latest ejabberd and rabbitmq-server, and for some customizations which will list in README.CUSTOMIZED. Anyway, the primary document is worth reading http://hg.rabbitmq.com/rabbitmq-xmpp/raw-file/default/doc/index.html.
 
-###########################################################
 
 To install this module, you should:
 
@@ -17,6 +16,3 @@ To install this module, you should:
 or 
 
 2.2 copy the beam files to ejabberd ebin directory, in which case you will profit from the ejabberd_update function.
-
-
-###########################################################

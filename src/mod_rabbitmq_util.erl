@@ -38,7 +38,8 @@
 -export([call/3]).
 -export([get_binstring_guid/0,
 		 basic_consume/2,
-		 cancel_consume/2]).
+		 cancel_consume/2,
+		 get_exchange/1]).
 
 -include("ejabberd.hrl").
 -include("rabbit.hrl").
@@ -101,10 +102,21 @@ with_queue(QN, Fun) ->
 get_queue( QName ) ->
 	case rabbit_call(rabbit_amqqueue, lookup, [QName]) of
 		{error, Reason} ->
-			?ERROR_MSG("lookup error ~p~n",[Reason]),
+			?ERROR_MSG("lookup queue: error ~p~n",[Reason]),
 			undefined;
 		R ->
-			?DEBUG("lookup return ~p~n",[R]),
+			?DEBUG("lookup queue: return ~p~n",[R]),
+			R
+	end.
+
+get_exchange( XNameBin ) ->
+	XName = ?XNAME( XNameBin ),
+	case rabbit_call(rabbit_exchange, lookup, [XName]) of
+		{error, Reason} ->
+			?ERROR_MSG("lookup exchange: error ~p~n",[Reason]),
+			undefined;
+		R ->
+			?DEBUG("lookup exchange: return ~p~n",[R]),
 			R
 	end.
 
