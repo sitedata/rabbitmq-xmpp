@@ -38,7 +38,7 @@
 		 basic_consume/2, cancel_consume/2,
 		 declare_queue/1, 
 		 get_queue/1, all_queues/0, delete_queue/1,
-		 declare_exchange/4, 
+		 declare_exchange/4, is_exchange_exist/1,
 		 get_exchange/1, all_exchanges/0, delete_exchange/1,
 		 get_bindings_by_exchange/1, get_bindings_by_queue/1,
 		 add_binding/3, remove_binding/3,
@@ -153,6 +153,14 @@ declare_exchange( XNameBin, TypeBin, Durable, AutoDelete ) ->
 				R ->
 					R
 			end
+	end.
+
+is_exchange_exist( XNameBin ) ->
+	case get_exchange( XNameBin ) of
+		undefined ->
+			false;
+		_ ->
+			true
 	end.
 
 get_exchange( XNameBin ) ->

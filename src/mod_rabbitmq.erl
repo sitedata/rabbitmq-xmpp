@@ -232,7 +232,7 @@ do_route(Host, From, To, {xmlelement, "presence", _, _} = Packet) ->
     {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
-			case is_bound( XNameBin ) of
+			case mod_rabbitmq_util:is_exchange_exist( XNameBin ) of
 				false ->
 					send_presence(To, From, "unsubscribed");
 				true ->
@@ -507,26 +507,15 @@ is_subscribed(XNameBin, RKBin, QNameBin) ->
 				  (_) ->
 					  false
 			  end, Bindings).
-
-is_bound( XNameBin ) ->
-	?DEBUG("is_bound: checking ~p ", [XNameBin]),
-	case mod_rabbitmq_util:get_exchange( XNameBin) of
-		undefined ->
-			?DEBUG("... not bound.~n",[]),
-			false;
-		_E ->
-			?DEBUG("... is bound.~n",[]),
-			true
-	end.			
 							 
 check_and_bind(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
-	case mod_rabbitmq_util:get_exchange( XNameBin ) of
-		undefined ->
+	case mod_rabbitmq_util:is_exchange_exist( XNameBin ) of
+		false ->
 			?DEBUG("... not present ~n", [XNameBin]),
 			false;
-		Exchange ->
-			?DEBUG("... exists, exchange: ~p~n", [Exchange]),
+		true ->
+			?DEBUG("... exists ~n", []),
 			case mod_rabbitmq_util:declare_queue( QNameBin ) of
 				{error, Reason} ->
 					?ERROR_MSG("check_and_bind: error ~p~n",[Reason]);
