@@ -32,14 +32,17 @@
 
 -module(mod_rabbitmq_util).
 
--compile(export_all).
-
 %% API
 -export([call/3]).
 -export([get_binstring_guid/0,
-		 basic_consume/2,
-		 cancel_consume/2,
-		 get_exchange/1]).
+		 basic_consume/2, cancel_consume/2,
+		 declare_queue/1, 
+		 get_queue/1, all_queues/0, delete_queue/1,
+		 declare_exchange/4, 
+		 get_exchange/1, all_exchanges/0, delete_exchange/1,
+		 get_bindings_by_exchange/1, get_bindings_by_queue/1,
+		 add_binding/3, remove_binding/3,
+		 publish_message/3]).
 
 -include("ejabberd.hrl").
 -include("rabbit.hrl").
@@ -51,32 +54,36 @@
 call(M, F, A) ->
 	rabbit_call(M, F, A).
 
-%%
-%% internal functions
-%%
 basic_consume( QNameBin , ConsumerTag )->
-	QName = ?QNAME( QNameBin ),
-	{ok, Queue} = get_queue( QName ),
-	case rabbit_call(rabbit_amqqueue, basic_consume,
-					 [Queue, true, self(), undefined, ConsumerTag, false, undefined])  of
-		{error, Reason} ->
-			?ERROR_MSG("basic_consume error ~p~n",[Reason]),
-			undefined;
-		R ->
-			?DEBUG("basic_consume return ~p~n",[R]),
-			R
+	case get_queue( QNameBin ) of		
+		{ok, Queue} ->
+			case rabbit_call(rabbit_amqqueue, basic_consume,
+							 [Queue, true, self(), undefined, ConsumerTag, false, undefined])  of
+				{error, Reason} ->
+					?ERROR_MSG("basic_consume error ~p~n",[Reason]),
+					{error, 'error_in_basic_consume'};
+				R ->
+					?DEBUG("basic_consume return ~p~n",[R]),
+					R
+			end;
+		Err ->
+			Err
 	end.
+
 cancel_consume( QNameBin, ConsumerTag ) ->
-	QName = ?QNAME( QNameBin ),
-	{ok, Queue} = get_queue( QName ),
-	case rabbit_call(rabbit_amqqueue, basic_cancel,
-					 [Queue, self(), ConsumerTag, undefined]) of
-		{error, Reason} ->
-			?ERROR_MSG("basic_cancel error ~p~n",[Reason]),
-			undefined;
-		R ->
-			?DEBUG("basic_cancel return ~p~n",[R]),
-			R
+	case get_queue( QNameBin ) of
+		{ok, Queue} ->
+			case rabbit_call(rabbit_amqqueue, basic_cancel,
+							 [Queue, self(), ConsumerTag, undefined]) of
+				{error, Reason} ->
+					?ERROR_MSG("basic_cancel error ~p~n",[Reason]),
+					{error, 'error_in_cancel_consume'};
+				R ->
+					?DEBUG("basic_cancel return ~p~n",[R]),
+					R
+			end;
+		Err ->
+			Err
 	end.
 
 get_binstring_guid() ->
@@ -89,7 +96,19 @@ get_binstring_guid() ->
 			R
 	end.
 
-get_queue( QName ) ->
+declare_queue( QNameBin ) ->
+	QName = ?QNAME( QNameBin ),
+	case rabbit_call(rabbit_amqqueue, declare,[QName, true, false, [], none]) of
+		{error, Reason} ->
+			?ERROR_MSG("declare queue: error ~p~n",[Reason]),
+			{error, 'error_in_declare_queue'};
+		R ->
+			?DEBUG("declare queue: return ~p~n",[R]),
+			R
+	end.
+	
+get_queue( QNameBin ) ->
+	QName = ?QNAME( QNameBin ),
 	case rabbit_call(rabbit_amqqueue, lookup, [QName]) of
 		{error, Reason} ->
 			?ERROR_MSG("lookup queue: error ~p~n",[Reason]),
@@ -97,6 +116,43 @@ get_queue( QName ) ->
 		R ->
 			?DEBUG("lookup queue: return ~p~n",[R]),
 			R
+	end.
+
+all_queues() ->
+	case rabbit_call(rabbit_amqqueue, list, [?VHOST]) of
+		{error, Reason} ->
+			?ERROR_MSG("all_queues: error in ~p~n",[Reason]),
+			[];
+		R ->
+			?DEBUG("mod_rabbitmq_util:call in ~p return ~p~n",[rabbit_amqqueues, R]),
+			R
+	end.
+
+delete_queue( Queue ) ->
+	case rabbit_call(rabbit_amqqueue, delete, [Queue, false, false]) of
+		{error, Reason} ->
+			?ERROR_MSG("delete_queue: error ~p ~n",[Reason]),
+			{error, 'error_in_delete_queue'};
+		ok ->
+			?DEBUG("delete_queue, ok~n",[]),
+			ok
+	end.
+
+declare_exchange( XNameBin, TypeBin, Durable, AutoDelete ) ->
+	case check_exchange_type( TypeBin ) of
+		Err = {error, Reason } -> 
+			?ERROR_MSG("declare_exchange: error ~p~n",[Reason]),
+			Err;
+		TypeAtom ->
+			XName = ?XNAME(XNameBin),
+			case rabbit_call(rabbit_exchange, declare,
+							 [XName,TypeAtom,Durable, AutoDelete,[]]) of
+				{error, Reason } ->
+					?ERROR_MSG("declare_exchange: error ~p~n",[Reason]),
+					{error, 'error_in_declare_exchange'};					
+				R ->
+					R
+			end
 	end.
 
 get_exchange( XNameBin ) ->
@@ -108,6 +164,98 @@ get_exchange( XNameBin ) ->
 		R ->
 			?DEBUG("lookup exchange: return ~p~n",[R]),
 			R
+	end.
+
+all_exchanges() ->
+	case mod_rabbitmq_util:call(rabbit_exchange, list, [?VHOST]) of
+		{error, Reason} ->
+			?ERROR_MSG("all_exchanges: error in ~p~n",[Reason]),
+			[];
+		R ->
+			?DEBUG("all_exchanges: return ~p~n",[R]),
+			R
+	end.
+
+delete_exchange( XNameBin ) ->
+	XName = ?XNAME( XNameBin ),
+	case rabbit_call(rabbit_exchange, delete, [XName, false]) of
+		{error, Reason} ->
+			?ERROR_MSG("delete_exchange: error ~p ~n",[Reason]),
+			{error, 'error_in_delete_exchange'};
+		ok ->
+			?DEBUG("delete_exchange, ok~n",[]),
+			ok
+	end.
+
+get_bindings_by_exchange( XNameBin ) ->	
+	XName = ?XNAME(XNameBin),
+
+	case rabbit_call(rabbit_binding, list_for_source, [XName]) of
+		{error, Reason} ->
+			?ERROR_MSG("get_bindings_by_source: error in ~p~n~p~n",[Reason]),
+			[];
+		R ->
+			?DEBUG("get_bindings_by_source: return ~p~n",[R]),
+			R
+	end.
+
+get_bindings_by_queue( QNameBin ) ->
+	QName = ?QNAME(QNameBin),
+	case rabbit_call(rabbit_binding, list_for_destination, [QName]) of
+		{error, Reason} ->
+			?ERROR_MSG("get_bindings_by_destination: error in ~p~n~p~n",[Reason]),
+			[];
+		R ->
+			?DEBUG("get_bindings_by_destination: return ~p~n",[R]),
+			R
+	end.
+
+add_binding( XNameBin, QNameBin, RKBin ) ->
+	XName = ?XNAME(XNameBin),
+	QName = ?QNAME(QNameBin),
+	Binding = #binding{source = XName, destination = QName, key = RKBin, args = []},
+	case rabbit_call(rabbit_binding, add, [ Binding ]) of
+		{error, Reason} ->
+			?ERROR_MSG("add_binding: error ~p~n",[Reason]),
+			{error, 'error_in_add_binding'};
+		R ->
+			?DEBUG("add_binding: return ~p~n",[R]),
+			R
+	end.
+
+
+remove_binding( XNameBin, QNameBin, RKBin ) ->
+	XName = ?XNAME(XNameBin),
+	QName = ?QNAME(QNameBin),
+	Binding = #binding{source = XName, destination = QName, key = RKBin, args = []},
+	case rabbit_call(rabbit_binding, remove, [ Binding ]) of
+		{error, Reason} ->
+			?ERROR_MSG("remove_binding: error ~p~n",[Reason]),
+			{error, 'error_in_remove_binding'};
+		R ->
+			?DEBUG("remove_binding: return ~p~n",[R]),
+			R
+	end.
+	
+publish_message( XNameBin, RKBin, MsgBody ) ->
+	%% FIXME: So many roundtrips!!
+	XName = ?XNAME(XNameBin),
+	MsgBodyBin = list_to_binary( MsgBody ),
+	Msg = rabbit_call(rabbit_basic, message,
+					  [ XName,RKBin,[{'content_type', <<"text/plain">>}], MsgBodyBin ]),
+	Delivery = rabbit_call(rabbit_basic, delivery,[false, false, none, Msg]),
+	rabbit_call(rabbit_basic, publish, [Delivery]).
+
+%%
+%% internal functions
+%%
+check_exchange_type( TypeBin ) ->
+	case rabbit_call(rabbit_exchange, check_type,[TypeBin]) of
+		Err = {error, Reason} ->
+			?ERROR_MSG("check_declare_type: error ~p~n",[Reason]),
+			Err;
+		TypeAtom ->
+			TypeAtom
 	end.
 
 rabbit_call(M, F, A) ->
