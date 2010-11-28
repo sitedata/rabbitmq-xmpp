@@ -736,14 +736,6 @@ send_command_reply(From, To, {ok, ResponseIoList}) ->
 send_command_reply(From, To, {error, ResponseIoList}) ->
     send_message(From, To, "chat", lists:flatten(ResponseIoList)).
 
-get_arg(ParsedArgs, Key, DefaultValue) ->
-    case lists:keysearch(Key, 1, ParsedArgs) of
-	{value, {_, V}} ->
-	    V;
-	false ->
-	    DefaultValue
-    end.
-
 do_command_declare(NameStr, ["-type", TypeStr | Rest], ParsedArgs) ->
     do_command_declare(NameStr, Rest, [{type, TypeStr} | ParsedArgs]);
 do_command_declare(NameStr, ["-transient" | Rest], ParsedArgs) ->
@@ -754,8 +746,8 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 	    {ok, "Names may not start with 'amq.'."};
 	_ ->
 			XNameBin = list_to_binary( NameStr ),
-			TypeBin = list_to_binary(get_arg(ParsedArgs, type, "fanout")),
-			Durable = get_arg(ParsedArgs, durable, true),			
+			TypeBin = list_to_binary(proplists:get_value(type, ParsedArgs, "fanout")),
+			Durable = proplists:get_value(durable, ParsedArgs, true),			
 			case mod_rabbitmq_util:declare_exchange( XNameBin, TypeBin, Durable, false ) of
 				{error, Reason} ->
 					?ERROR_MSG("do_command_declare error ~p~n",[Reason]),
