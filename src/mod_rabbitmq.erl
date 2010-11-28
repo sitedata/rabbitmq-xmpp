@@ -518,16 +518,17 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 			?DEBUG("... exists ~n", []),
 			case mod_rabbitmq_util:declare_queue( QNameBin ) of
 				{error, Reason} ->
-					?ERROR_MSG("check_and_bind: error ~p~n",[Reason]);
+					?ERROR_MSG("check_and_bind: error ~p~n",[Reason]),
+					false;
 				_ ->
 					case mod_rabbitmq_util:add_binding( XNameBin, QNameBin, RKBin ) of
 						{error, Reason} ->
-							?ERROR_MSG("check_and_bind: error ~p~n",[Reason]);
+							?ERROR_MSG("check_and_bind: error ~p~n",[Reason]),
+							false;
 						_ ->
-							ok
+							true
 					end
-			end,
-			true
+			end
     end.
 
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->
