@@ -35,8 +35,6 @@
 -behaviour(gen_server).
 -behaviour(gen_mod).
 
--compile(export_all).
-
 %% API
 -export([start_link/2, 
 		 start/2, 
@@ -204,7 +202,7 @@ ensure_connection_to_rabbitmq( Host, RabbitNode, Times) ->
 			end
 	end.
 
-do_route(Host,#jid{lserver = FromServer} = From,
+do_route(_Host,#jid{lserver = FromServer} = From,
 		 #jid{lserver = ToServer} = To,
 		 {xmlelement, "presence", _, _})
   when FromServer == ToServer ->
@@ -212,7 +210,7 @@ do_route(Host,#jid{lserver = FromServer} = From,
     ?WARNING_MSG("Tight presence loop between~n~p and~n~p~nbroken.",
 		 [From, To]),
     ok;
-do_route(Host, From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) ->
+do_route(_Host, From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) ->
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
 	    send_presence(To, From, "unsubscribed");
@@ -272,7 +270,7 @@ do_route(Host, From, To, {xmlelement, "presence", _, _} = Packet) ->
 	    ?INFO_MSG("Other kind of presence~n~p", [Packet])
     end,
     ok;
-do_route(Host, From, To, {xmlelement, "message", _, _} = Packet) ->
+do_route(_Host, From, To, {xmlelement, "message", _, _} = Packet) ->
     case xml:get_subtag_cdata(Packet, "body") of
 	"" ->
 	    ?DEBUG("Ignoring message with empty body", []);
@@ -291,7 +289,7 @@ do_route(Host, From, To, {xmlelement, "message", _, _} = Packet) ->
 	    end
     end,
     ok;
-do_route(Host, From, To, {xmlelement, "iq", _, Els0} = Packet) ->
+do_route(_Host, From, To, {xmlelement, "iq", _, Els0} = Packet) ->
     Els = xml:remove_cdata(Els0),
     IqId = xml:get_tag_attr_s("id", Packet),
     case xml:get_tag_attr_s("type", Packet) of
