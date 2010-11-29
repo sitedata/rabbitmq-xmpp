@@ -621,7 +621,7 @@ probe_bindings(Server, JID, Arg ) ->
 add_consumer_member(Host, QNameBin, JID, RKBin, Server, Priority) ->
 	Pid = case get_consumer_process( QNameBin ) of
 			  undefined ->
-				  new_consumer_process( Host, QNameBin, JID, RKBin, Server, Priority );
+				  new_consumer_process( Host, QNameBin, Server );
 			  Pid1 ->
 				  Pid1
 		  end,
@@ -644,9 +644,8 @@ get_consumer_process( QNameBin ) ->
 			undefined
 	end.
 
-new_consumer_process( Host, QNameBin, JID, RKBin, Server, Priority ) ->
-	{ok, Pid} = mod_rabbitmq_consumer:start(Host, QNameBin, JID, RKBin, 
-											Server, Priority, get(rabbitmq_node)),
+new_consumer_process( Host, QNameBin, Server ) ->
+	{ok, Pid} = mod_rabbitmq_consumer:start(Host, QNameBin, Server, get(rabbitmq_node)),
 	mnesia:transaction( 
 	  fun() ->
 			  mnesia:write(#rabbitmq_consumer_process{queue = QNameBin, pid = Pid})

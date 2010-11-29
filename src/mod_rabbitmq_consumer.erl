@@ -36,8 +36,8 @@
 -compile(export_all).
 
 % API
--export([start/7, stop/1,
-		 start_link/7,
+-export([start/4, stop/1,
+		 start_link/4,
 		 set_rabbitmq_node/2,
 		 add_member/4,
 		 remove_member/4]).
@@ -60,24 +60,23 @@
 				 priorities,
 				 server_host}).
 
-start(Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode) ->
+start(Host, QNameBin, Server, RabbitNode) ->
 	%TODO start_supervisor
-	start_link(Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode).
+	start_link(Host, QNameBin, Server, RabbitNode).
 
 stop( Pid ) ->
 	gen_server:call(Pid, stop).
 
-start_link(Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode) ->
-    gen_server:start_link(?MODULE, [Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode], []).
+start_link(Host, QNameBin, Server, RabbitNode) ->
+    gen_server:start_link(?MODULE, [Host, QNameBin, Server, RabbitNode], []).
 
 %%---------------------------------------------------------------------------
 
 %%
 %% gen_server callbacks
 %%
-init([Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode]) ->
-    ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
-	      [QNameBin, JID, Priority, RKBin]),
+init([Host, QNameBin, Server, RabbitNode]) ->
+    ?INFO_MSG("**** starting consumer for queue ~p~n",[QNameBin]),
 	put(rabbitmq_node, RabbitNode ),
 	
     ConsumerTag = mod_rabbitmq_util:get_binstring_guid(),
@@ -86,7 +85,7 @@ init([Host, QNameBin, JID, RKBin, Server, Priority, RabbitNode]) ->
     {ok, #state{lserver = Server,
 				consumer_tag = ConsumerTag,
 				queue = QNameBin,
-				priorities = [{-Priority, {JID, RKBin}}],
+				priorities = [],
 				server_host = Host}}.
 
 
@@ -99,9 +98,10 @@ handle_cast({rabbitmq_node_change, Node}, State) ->
 	{noreply, State};
 
 handle_cast({presence, JID, RKBin, Priority}, 
-			#state{ priorities = Priorities} = State) ->
+			#state{ priorities = Priorities} = State) ->	
 	NewPriorities = lists:keysort(1, keystore({JID, RKBin}, 2, Priorities,
 						      {-Priority, {JID, RKBin}})),
+	?DEBUG("consumer new priorities: ~p ~n", [NewPriorities]),
 	{noreply, State#state{priorities = NewPriorities}};
 
 handle_cast({unavailable, JID, RKBin, AllResources},
