@@ -26,7 +26,7 @@ ifdef debug
   EFLAGS+=+debug_info +export_all
 endif
 
-ERL_OBJECTS=mod_rabbitmq_util.beam mod_rabbitmq_consumer.beam mod_rabbitmq.beam
+ERL_OBJECTS=mod_rabbitmq_util_priv.beam mod_rabbitmq_util.beam mod_rabbitmq_consumer.beam mod_rabbitmq.beam
 
 all: check_rabbit_hrl $(ERL_OBJECTS)
 

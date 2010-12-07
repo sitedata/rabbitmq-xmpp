@@ -244,8 +244,10 @@ remove_binding( XNameBin, QNameBin, RKBin ) ->
 			?DEBUG("remove_binding: return ~p~n",[R]),
 			R
 	end.
-	
 publish_message( XNameBin, RKBin, MsgBody ) ->
+	publish_message_priv( XNameBin, RKBin, MsgBody, false ).
+	
+publish_message_hobble( XNameBin, RKBin, MsgBody ) ->
 	%% FIXME: So many roundtrips!!
 	XName = ?XNAME(XNameBin),
 	MsgBodyBin = list_to_binary( MsgBody ),
@@ -253,6 +255,35 @@ publish_message( XNameBin, RKBin, MsgBody ) ->
 					  [ XName,RKBin,[{'content_type', <<"text/plain">>}], MsgBodyBin ]),
 	Delivery = rabbit_call(rabbit_basic, delivery,[false, false, none, Msg]),
 	rabbit_call(rabbit_basic, publish, [Delivery]).
+
+publish_message_priv( XNameBin, RKBin, MsgBody, IsRetry ) ->
+	XName = ?XNAME(XNameBin),
+	MsgBodyBin = list_to_binary( MsgBody ),
+	PrivModule = mod_rabbitmq_util_priv,
+
+	case rabbit_call(PrivModule, publish_message, [XName, RKBin, MsgBodyBin]) of
+		{error, {undef, _} } -> 
+			case IsRetry of 
+				false ->
+					case post_module_to_rabbitmq_server( PrivModule ) of
+						ok ->
+							publish_message_priv( XNameBin, RKBin, MsgBody, true );
+						{error, Reason1} ->
+							?ERROR_MSG("publish_message_priv: can't post module, error ~p~n",[Reason1]),
+							{error, 'error_in_publish_message_priv'}
+					end;
+				true ->
+					?ERROR_MSG("publish_message_priv: fail to retry ~n",[]),
+					{error, 'error_in_publish_message_priv'}
+			end;
+
+		{error, Reason} ->
+			?ERROR_MSG("publish_message_priv: error ~p~n",[Reason]),
+			{error, 'error_in_publish_message_priv'};
+		R ->
+			?DEBUG("publish_message_priv: return ~p~n",[R]),
+			R
+	end.							
 
 %%
 %% internal functions
@@ -282,3 +313,20 @@ rabbit_call(M, F, A) ->
         V ->
             V
     end.
+
+post_module_to_rabbitmq_server( Module ) ->	
+	?DEBUG("post module: ~p to rabbitmq server ... ", [Module]),
+	case code:get_object_code( Module ) of
+		{_Module, Binary, Filename } ->					
+			case rabbit_call(code, load_binary, [Module, Filename, Binary]) of
+				{module, _Module} ->
+					?DEBUG("succeed.~n",[]),
+					ok;
+				{error, Reason} ->
+					?DEBUG("fail, reason: ~p~n",[Reason]),
+					{error, 'error_in_post_module_rpc'}
+			end;
+		error ->
+			?ERROR_MSG("can't get object code of ~p~n",[Module]),
+			{error, 'error_in_post_module'}
+	end.
