@@ -2,8 +2,13 @@
 
 DOC_DIR=doc
 VERSION=0.0.1
+EBIN_DIR=./ebin
 
-EJABBERD_INCLUDE_DIR=/usr/lib/ejabberd/include
+ifndef EJABBERD_DIR
+EJABBERD_DIR=/usr/local/ejabberd/lib/ejabberd
+endif
+EJABBERD_EBIN_DIR=$(EJABBERD_DIR)/ebin
+EJABBERD_INCLUDE_DIR=$(EJABBERD_DIR)/include
 CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
 WIDTH=1024
@@ -16,13 +21,20 @@ else
 SED=sed
 endif
 
-all: check_rabbit_hrl mod_rabbitmq.beam
+EFLAGS= -pa $(EJABBERD_EBIN_DIR)
+ifdef debug
+  EFLAGS+=+debug_info +export_all
+endif
+
+ERL_OBJECTS=mod_rabbitmq_util.beam mod_rabbitmq_consumer.beam mod_rabbitmq.beam
+
+all: check_rabbit_hrl $(ERL_OBJECTS)
 
 check_rabbit_hrl:
 	@if [ -e $(CANONICAL_RABBIT_HEADER) ]; then diff -q $(CANONICAL_RABBIT_HEADER) src/rabbit.hrl; else echo Skipping rabbit.hrl check because $(CANONICAL_RABBIT_HEADER) does not exist; fi
 
 clean:
-	rm -f mod_rabbitmq.beam
+	rm -rf $(EBIN_DIR)
 	rm -f build-stamp install-stamp
 
 clean-doc:
@@ -51,6 +63,8 @@ doc/%.png: src/%.svg
 	inkscape --export-dpi=$(DPI) --export-png=$@ $<
 
 %.beam: src/%.erl
-	erlc -I $(EJABBERD_INCLUDE_DIR) $<
+	erlc $(EFLAGS) -I $(EJABBERD_INCLUDE_DIR) $<
+	mkdir -p $(EBIN_DIR)
+	mv $@ $(EBIN_DIR)
 
 distclean: clean

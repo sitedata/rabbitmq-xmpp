@@ -1,0 +1,5 @@
+TODO list:
+
+1 disable message commands, i.e., list
+2 disable disco info for all exchanges.
+3 use rabbit_amqququ:with, which might need a plugin in rabbitmq-server
