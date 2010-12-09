@@ -245,17 +245,17 @@ remove_binding( XNameBin, QNameBin, RKBin ) ->
 			R
 	end.
 publish_message( XNameBin, RKBin, MsgBody ) ->
-	publish_message_priv( XNameBin, RKBin, MsgBody, false ).
-	
-publish_message_hobble( XNameBin, RKBin, MsgBody ) ->
-	%% FIXME: So many roundtrips!!
 	XName = ?XNAME(XNameBin),
 	MsgBodyBin = list_to_binary( MsgBody ),
-	Msg = rabbit_call(rabbit_basic, message,
-					  [ XName,RKBin,[{'content_type', <<"text/plain">>}], MsgBodyBin ]),
-	Delivery = rabbit_call(rabbit_basic, delivery,[false, false, none, Msg]),
-	rabbit_call(rabbit_basic, publish, [Delivery]).
-
+	case rabbit_call( rabbit_basic, publish, [XName, RKBin, [{'content_type', <<"text/plain">>}], MsgBodyBin]) of
+		{error, Reason} ->
+			?ERROR_MSG("publish_message: error ~p~n",[Reason]),
+			{error, 'error_in_publish_message'};
+		R ->
+			?DEBUG("publish_message: return ~p~n",[R]),
+			R
+	end.							
+	
 publish_message_priv( XNameBin, RKBin, MsgBody, IsRetry ) ->
 	XName = ?XNAME(XNameBin),
 	MsgBodyBin = list_to_binary( MsgBody ),
