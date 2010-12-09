@@ -50,11 +50,42 @@
 -define(VHOST, <<"/">>).
 -define(XNAME(Name), #resource{virtual_host = ?VHOST, kind = exchange, name = Name}).
 -define(QNAME(Name), #resource{virtual_host = ?VHOST, kind = queue, name = Name}).
+-define(PRIV_MODULE, mod_rabbitmq_util_priv).
 
 call(M, F, A) ->
 	rabbit_call(M, F, A).
 
 basic_consume( QNameBin , ConsumerTag )->
+	QName = ?QNAME( QNameBin ),
+	ChPid = self(),
+	basic_consume_priv( QName, ChPid, ConsumerTag, false ).
+
+basic_consume_priv( QName, ChPid, ConsumerTag, IsRetry ) ->   
+	case rabbit_call( ?PRIV_MODULE, basic_consume,[QName, ChPid, ConsumerTag])  of
+		{error, {undef, _} } -> 
+			case IsRetry of 
+				false ->
+					case post_module_to_rabbitmq_server( ?PRIV_MODULE ) of
+						ok ->
+							basic_consume_priv( QName, ChPid, ConsumerTag, true );
+						{error, Reason1} ->
+							?ERROR_MSG("basic_consume_priv: can't post module, error ~p~n",[Reason1]),
+							{error, 'error_in_basic_consume_priv'}
+					end;
+				true ->
+					?ERROR_MSG("basic_consume_priv: fail to retry ~n",[]),
+					{error, 'error_in_basic_consume_priv'}
+			end;
+
+		{error, Reason} ->
+			?ERROR_MSG("basic_consume error ~p~n",[Reason]),
+			{error, 'error_in_basic_consume_priv'};
+		R ->
+			?DEBUG("basic_consume_priv return ~p~n",[R]),
+			R
+	end.
+
+basic_consume_hobble( QNameBin , ConsumerTag )->
 	case get_queue( QNameBin ) of		
 		{ok, Queue} ->
 			case rabbit_call(rabbit_amqqueue, basic_consume,
@@ -70,7 +101,37 @@ basic_consume( QNameBin , ConsumerTag )->
 			Err
 	end.
 
-cancel_consume( QNameBin, ConsumerTag ) ->
+cancel_consume( QNameBin , ConsumerTag )->
+	QName = ?QNAME( QNameBin ),
+	ChPid = self(),
+	cancel_consume_priv( QName, ChPid, ConsumerTag, false ).
+
+cancel_consume_priv( QName, ChPid, ConsumerTag, IsRetry ) ->   
+	case rabbit_call( ?PRIV_MODULE, cancel_consume,[QName, ChPid, ConsumerTag])  of
+		{error, {undef, _} } -> 
+			case IsRetry of 
+				false ->
+					case post_module_to_rabbitmq_server( ?PRIV_MODULE ) of
+						ok ->
+							cancel_consume_priv( QName, ChPid, ConsumerTag, true );
+						{error, Reason1} ->
+							?ERROR_MSG("cancel_consume_priv: can't post module, error ~p~n",[Reason1]),
+							{error, 'error_in_cancel_consume_priv'}
+					end;
+				true ->
+					?ERROR_MSG("cancel_consume_priv: fail to retry ~n",[]),
+					{error, 'error_in_cancel_consume_priv'}
+			end;
+
+		{error, Reason} ->
+			?ERROR_MSG("cancel_consume error ~p~n",[Reason]),
+			{error, 'error_in_cancel_consume_priv'};
+		R ->
+			?DEBUG("cancel_consume_priv return ~p~n",[R]),
+			R
+	end.
+
+cancel_consume_hobble( QNameBin, ConsumerTag ) ->
 	case get_queue( QNameBin ) of
 		{ok, Queue} ->
 			case rabbit_call(rabbit_amqqueue, basic_cancel,
