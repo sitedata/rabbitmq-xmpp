@@ -85,21 +85,6 @@ basic_consume_priv( QName, ChPid, ConsumerTag, IsRetry ) ->
 			R
 	end.
 
-basic_consume_hobble( QNameBin , ConsumerTag )->
-	case get_queue( QNameBin ) of		
-		{ok, Queue} ->
-			case rabbit_call(rabbit_amqqueue, basic_consume,
-							 [Queue, true, self(), undefined, ConsumerTag, false, undefined])  of
-				{error, Reason} ->
-					?ERROR_MSG("basic_consume error ~p~n",[Reason]),
-					{error, 'error_in_basic_consume'};
-				R ->
-					?DEBUG("basic_consume return ~p~n",[R]),
-					R
-			end;
-		Err ->
-			Err
-	end.
 
 cancel_consume( QNameBin , ConsumerTag )->
 	QName = ?QNAME( QNameBin ),
@@ -129,22 +114,6 @@ cancel_consume_priv( QName, ChPid, ConsumerTag, IsRetry ) ->
 		R ->
 			?DEBUG("cancel_consume_priv return ~p~n",[R]),
 			R
-	end.
-
-cancel_consume_hobble( QNameBin, ConsumerTag ) ->
-	case get_queue( QNameBin ) of
-		{ok, Queue} ->
-			case rabbit_call(rabbit_amqqueue, basic_cancel,
-							 [Queue, self(), ConsumerTag, undefined]) of
-				{error, Reason} ->
-					?ERROR_MSG("basic_cancel error ~p~n",[Reason]),
-					{error, 'error_in_cancel_consume'};
-				R ->
-					?DEBUG("basic_cancel return ~p~n",[R]),
-					R
-			end;
-		Err ->
-			Err
 	end.
 
 get_binstring_guid() ->
