@@ -33,13 +33,7 @@
 -module(mod_rabbitmq_util_priv).
 
 %% API
--export([publish_message/3,
-		 basic_consume/3, cancel_consume/3]).
-
-publish_message( XName, RKBin, MsgBodyBin ) ->
-	Msg = rabbit_basic:message(XName, RKBin, [{'content_type', <<"text/plain">>}], MsgBodyBin ),
-	Delivery = rabbit_basic:delivery(false, false, none, Msg),		
-	rabbit_basic:publish( Delivery ).
+-export([basic_consume/3, cancel_consume/3]).
 
 basic_consume( QName, ChPid, ConsumerTag ) ->
 	rabbit_amqqueue:with(QName, basic_consume_fun(ChPid, ConsumerTag)).

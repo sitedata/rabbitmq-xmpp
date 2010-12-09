@@ -317,35 +317,6 @@ publish_message( XNameBin, RKBin, MsgBody ) ->
 			R
 	end.							
 	
-publish_message_priv( XNameBin, RKBin, MsgBody, IsRetry ) ->
-	XName = ?XNAME(XNameBin),
-	MsgBodyBin = list_to_binary( MsgBody ),
-	PrivModule = mod_rabbitmq_util_priv,
-
-	case rabbit_call(PrivModule, publish_message, [XName, RKBin, MsgBodyBin]) of
-		{error, {undef, _} } -> 
-			case IsRetry of 
-				false ->
-					case post_module_to_rabbitmq_server( PrivModule ) of
-						ok ->
-							publish_message_priv( XNameBin, RKBin, MsgBody, true );
-						{error, Reason1} ->
-							?ERROR_MSG("publish_message_priv: can't post module, error ~p~n",[Reason1]),
-							{error, 'error_in_publish_message_priv'}
-					end;
-				true ->
-					?ERROR_MSG("publish_message_priv: fail to retry ~n",[]),
-					{error, 'error_in_publish_message_priv'}
-			end;
-
-		{error, Reason} ->
-			?ERROR_MSG("publish_message_priv: error ~p~n",[Reason]),
-			{error, 'error_in_publish_message_priv'};
-		R ->
-			?DEBUG("publish_message_priv: return ~p~n",[R]),
-			R
-	end.							
-
 %%
 %% internal functions
 %%
