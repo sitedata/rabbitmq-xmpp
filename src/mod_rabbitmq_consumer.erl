@@ -128,13 +128,17 @@ handle_cast({deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg
 	#basic_message{exchange_name = #resource{name = XNameBin},
 				   routing_key = RKBin,
 				   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
-	[{_, {TopPriorityJID, _}} | _] = Priorities,
-	send_message(jlib:make_jid(binary_to_list(XNameBin),
-							   State#state.lserver,
-							   binary_to_list(RKBin)),
-				 TopPriorityJID,
-				 "chat",
-				 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
+	case Priorities of
+		[] ->
+			ok;		
+		[{_, {TopPriorityJID, _}} | _] ->
+			send_message(jlib:make_jid(binary_to_list(XNameBin),
+									   State#state.lserver,
+									   binary_to_list(RKBin)),
+						 TopPriorityJID,
+						 "chat",
+						 binary_to_list(list_to_binary(lists:reverse(PayloadRev))))
+	end,
 	case mod_rabbitmq_util:call(rabbit_amqqueue, notify_sent, [QPid, self()]) of
 		{error, Reason1} ->
 			?ERROR_MSG("mod_rabbitmq_util:call error in ~p~n~p~n",
